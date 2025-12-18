@@ -1,0 +1,28 @@
+services:
+  - type: worker
+    name: botee-bot-worker
+    env: node
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/index.js
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: DATA_BACKEND
+        value: sheets
+      - key: TIMEZONE
+        value: Europe/Berlin
+      - key: CITY_CODES
+        value: FFM
+      - key: DB_PATH
+        value: /data/app.db
+      - key: GOOGLE_SHEETS_SPREADSHEET_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_EMAIL
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+        sync: false
