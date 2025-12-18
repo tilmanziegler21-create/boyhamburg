@@ -19,7 +19,7 @@ import {
   getUsers as mockGetUsers,
   addUser as mockAddUser,
   updateUser as mockUpdateUser
-} from "./mock/MockData";
+} from "./MockData";
 
 export async function getProducts(): Promise<Product[]> {
   return useSheets ? sheetsGetProducts() : mockGetProducts();
