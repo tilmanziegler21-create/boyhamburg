@@ -11,11 +11,26 @@ type Range = {
 };
 
 function authClient() {
-  const keyFile = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH || "service-account.json";
-  if (keyFile && fs.existsSync(keyFile)) {
-    return new google.auth.GoogleAuth({ keyFile, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+  const keyFile = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH;
+  if (keyFile) {
+    if (fs.existsSync(keyFile)) {
+      logger.info("Using GoogleAuth with keyFile", { keyFile });
+      return new google.auth.GoogleAuth({ keyFile, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+    }
+    const err = `Secret file not found at ${keyFile}`;
+    logger.error("Sheets auth error", { error: err });
+    throw new Error(err);
   }
-  return new google.auth.JWT({ email: env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key: env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+  const email = env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const key = env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  if (email && key) {
+    const cleanKey = key.replace(/\\n/g, "\n");
+    logger.info("Using JWT auth from env email/private key");
+    return new google.auth.JWT({ email, key: cleanKey, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+  }
+  const err = "Missing Google service account credentials (JSON path or email/private key)";
+  logger.error("Sheets auth error", { error: err });
+  throw new Error(err);
 }
 
 function sheetsApi() {
