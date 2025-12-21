@@ -10,6 +10,35 @@ type Range = {
   startRow: number;
 };
 
+function parseServiceAccount(raw: string) {
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+  }
+  try {
+    const j = JSON.parse(cleaned);
+    const email = String(j.client_email || "");
+    const key = String(j.private_key || "").replace(/\\n/g, "\n");
+    if (email && key) return { email, key };
+  } catch {}
+  const braceStart = cleaned.indexOf("{");
+  const braceEnd = cleaned.lastIndexOf("}");
+  if (braceStart >= 0 && braceEnd > braceStart) {
+    try {
+      const j = JSON.parse(cleaned.slice(braceStart, braceEnd + 1));
+      const email = String(j.client_email || "");
+      const key = String(j.private_key || "").replace(/\\n/g, "\n");
+      if (email && key) return { email, key };
+    } catch {}
+  }
+  const emailMatch = cleaned.match(/client_email["']?\s*[:=]\s*["']([^"']+)["']/i);
+  const pemMatch = cleaned.match(/-----BEGIN[^-]*KEY-----[\s\S]*?-----END[^-]*KEY-----/);
+  const email = emailMatch ? emailMatch[1] : "";
+  const key = pemMatch ? pemMatch[0].replace(/\\n/g, "\n") : "";
+  if (email && key) return { email, key };
+  throw new Error("Invalid JSON: cannot extract client_email/private_key");
+}
+
 function authClient() {
   const keyFile = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH;
   if (keyFile) {
@@ -20,34 +49,19 @@ function authClient() {
     }
     try {
       const raw = fs.readFileSync(keyFile, "utf8");
-      let cleaned = raw.trim();
-      if (cleaned.startsWith("```")) {
-        cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
-      }
-      let json: any;
-      try {
-        json = JSON.parse(cleaned);
-      } catch {
-        const start = cleaned.indexOf("{");
-        const end = cleaned.lastIndexOf("}");
-        if (start >= 0 && end > start) {
-          json = JSON.parse(cleaned.slice(start, end + 1));
-        } else {
-          throw new Error("Invalid JSON: cannot locate object braces");
-        }
-      }
-      const email = String(json.client_email || "");
-      const key = String(json.private_key || "").replace(/\\n/g, "\n");
-      if (!email || !key) {
-        const err = "Invalid service account JSON: missing client_email/private_key";
-        logger.error("Sheets auth error", { error: err });
-        throw new Error(err);
-      }
+      const { email, key } = parseServiceAccount(raw);
       logger.info("Using JWT auth from keyFile", { keyFile });
       return new google.auth.JWT({ email, key, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
     } catch (e) {
       const err = `Failed to parse service account JSON: ${String(e)}`;
       logger.error("Sheets auth error", { error: err });
+      const email = env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+      const key = env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+      if (email && key) {
+        const cleanKey = String(key).replace(/\\n/g, "\n");
+        logger.info("Fallback to JWT auth from env email/private key");
+        return new google.auth.JWT({ email, key: cleanKey, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+      }
       throw new Error(err);
     }
   }
