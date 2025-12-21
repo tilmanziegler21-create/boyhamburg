@@ -20,7 +20,22 @@ function authClient() {
     }
     try {
       const raw = fs.readFileSync(keyFile, "utf8");
-      const json = JSON.parse(raw);
+      let cleaned = raw.trim();
+      if (cleaned.startsWith("```")) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+      }
+      let json: any;
+      try {
+        json = JSON.parse(cleaned);
+      } catch {
+        const start = cleaned.indexOf("{");
+        const end = cleaned.lastIndexOf("}");
+        if (start >= 0 && end > start) {
+          json = JSON.parse(cleaned.slice(start, end + 1));
+        } else {
+          throw new Error("Invalid JSON: cannot locate object braces");
+        }
+      }
       const email = String(json.client_email || "");
       const key = String(json.private_key || "").replace(/\\n/g, "\n");
       if (!email || !key) {
