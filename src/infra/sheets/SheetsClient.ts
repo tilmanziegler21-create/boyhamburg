@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { env } from "../config";
+import fs from "fs";
 import { getDefaultCity } from "../backend";
 import { logger } from "../logger";
 import { Courier, Order, Product, User } from "../../core/types";
@@ -10,12 +11,11 @@ type Range = {
 };
 
 function authClient() {
-  const jwt = new google.auth.JWT({
-    email: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"]
-  });
-  return jwt;
+  const keyFile = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH || "service-account.json";
+  if (keyFile && fs.existsSync(keyFile)) {
+    return new google.auth.GoogleAuth({ keyFile, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+  }
+  return new google.auth.JWT({ email: env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key: env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
 }
 
 function sheetsApi() {
