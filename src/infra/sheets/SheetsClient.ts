@@ -236,17 +236,17 @@ export async function updateProductPrice(product_id: number, new_price: number):
 
 export async function getCouriers(): Promise<Courier[]> {
   const { headers, rows } = await readSheet("couriers");
-  const idIdx = headerIndex(headers, "courier_id");
-  const nameIdx = headerIndex(headers, "name");
-  const tgIdx = headerIndex(headers, "tg_id");
-  const activeIdx = headerIndex(headers, "active");
-  const intervalIdx = headerIndex(headers, "last_delivery_interval");
-  return rows.map((r) => ({
-    courier_id: Number(r[idIdx]),
-    name: r[nameIdx],
-    tg_id: Number(r[tgIdx]),
-    active: String(r[activeIdx]).toLowerCase() === "true",
-    last_delivery_interval: r[intervalIdx] as Courier["last_delivery_interval"]
+  const idIdx = headerIndexAny(headers, ["courier_id", "id"]);
+  const nameIdx = headerIndexAny(headers, ["name", "имя"]);
+  const tgIdx = headerIndexAny(headers, ["tg_id", "telegram_id", "chat_id"]);
+  const activeIdx = headerIndexAny(headers, ["active", "is_active", "активен"]);
+  const intervalIdx = headerIndexAny(headers, ["last_delivery_interval", "interval", "delivery_interval"]);
+  return rows.map((r, i) => ({
+    courier_id: idIdx >= 0 ? Number(r[idIdx]) : i + 1,
+    name: nameIdx >= 0 ? r[nameIdx] : `Courier ${i + 1}`,
+    tg_id: tgIdx >= 0 ? Number(r[tgIdx]) : 0,
+    active: activeIdx >= 0 ? ["true", "1", "да", "yes"].includes(String(r[activeIdx]).trim().toLowerCase()) : true,
+    last_delivery_interval: (intervalIdx >= 0 && r[intervalIdx] ? r[intervalIdx] : "14-16") as Courier["last_delivery_interval"]
   }));
 }
 
