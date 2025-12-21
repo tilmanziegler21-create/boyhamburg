@@ -47,23 +47,8 @@ function authClient() {
       logger.error("Sheets auth error", { error: err });
       throw new Error(err);
     }
-    try {
-      const raw = fs.readFileSync(keyFile, "utf8");
-      const { email, key } = parseServiceAccount(raw);
-      logger.info("Using JWT auth from keyFile", { keyFile });
-      return new google.auth.JWT({ email, key, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
-    } catch (e) {
-      const err = `Failed to parse service account JSON: ${String(e)}`;
-      logger.error("Sheets auth error", { error: err });
-      const email = env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-      const key = env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
-      if (email && key) {
-        const cleanKey = String(key).replace(/\\n/g, "\n");
-        logger.info("Fallback to JWT auth from env email/private key");
-        return new google.auth.JWT({ email, key: cleanKey, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
-      }
-      throw new Error(err);
-    }
+    logger.info("Using GoogleAuth with keyFile", { keyFile });
+    return new google.auth.GoogleAuth({ keyFile, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
   }
   const email = env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const key = env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
