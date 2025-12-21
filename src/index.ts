@@ -9,6 +9,7 @@ import { validateSheetsSchemaOrThrow } from "./infra/sheets/SchemaValidator";
 import { useSheets } from "./infra/config";
 
 async function main() {
+  logger.info("Runtime", { node: process.version, openssl: process.versions.openssl, node_options: process.env.NODE_OPTIONS || "" });
   await initDb();
   if (useSheets) {
     const city = getDefaultCity();
