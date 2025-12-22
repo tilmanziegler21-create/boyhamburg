@@ -241,12 +241,20 @@ export async function getCouriers(): Promise<Courier[]> {
   const tgIdx = headerIndexAny(headers, ["tg_id", "telegram_id", "chat_id"]);
   const activeIdx = headerIndexAny(headers, ["active", "is_active", "активен"]);
   const intervalIdx = headerIndexAny(headers, ["last_delivery_interval", "interval", "delivery_interval"]);
+  const timeFromIdx = headerIndexAny(headers, ["time_from", "from", "start"]);
+  const timeToIdx = headerIndexAny(headers, ["time_to", "to", "end"]);
   return rows.map((r, i) => ({
     courier_id: idIdx >= 0 ? Number(r[idIdx]) : i + 1,
     name: nameIdx >= 0 ? r[nameIdx] : `Courier ${i + 1}`,
     tg_id: tgIdx >= 0 ? Number(r[tgIdx]) : 0,
     active: activeIdx >= 0 ? ["true", "1", "да", "yes"].includes(String(r[activeIdx]).trim().toLowerCase()) : true,
-    last_delivery_interval: (intervalIdx >= 0 && r[intervalIdx] ? r[intervalIdx] : "14-16") as Courier["last_delivery_interval"]
+    last_delivery_interval: (
+      intervalIdx >= 0 && r[intervalIdx]
+        ? r[intervalIdx]
+        : (timeFromIdx >= 0 && timeToIdx >= 0 && r[timeFromIdx] && r[timeToIdx]
+            ? `${String(r[timeFromIdx]).trim()}-${String(r[timeToIdx]).trim()}`
+            : "14-16")
+    ) as Courier["last_delivery_interval"]
   }));
 }
 
