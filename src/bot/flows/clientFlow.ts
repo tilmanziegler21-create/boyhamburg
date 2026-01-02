@@ -291,11 +291,11 @@ export function registerClientFlow(bot: TelegramBot) {
         const productsAll = await refreshProductsCache();
         const available = productsAll.filter((x) => x.active && x.category === "liquids" && !items.find((i) => i.product_id === x.product_id));
         for (let i = available.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = available[i]; available[i] = available[j]; available[j] = t; }
-        const pick = available.slice(0, 3);
+        const pick = available.slice(0, 2);
         try { getDb().prepare("INSERT INTO events(date, type, user_id, payload) VALUES (?,?,?,?)").run(new Date().toISOString(), "upsell_offer", user_id, JSON.stringify({ suggestions: pick.map(x=>x.product_id) })); } catch {}
         let liquCount = 0; for (const it of items) { const ip = products.find((x) => x.product_id === it.product_id); if (ip && ip.category === "liquids") liquCount += it.qty; }
         const nextLabel = liquCount >= 2 ? "15.00 €" : "16.00 €";
-        const rows: { text: string; callback_data: string }[][] = pick.map((s) => [{ text: `➕ Добавить вкус — ${nextLabel}`, callback_data: encodeCb(`add_upsell:${s.product_id}`) }]);
+        const rows: { text: string; callback_data: string }[][] = pick.map((s) => [{ text: `➕ ${s.title} — ${nextLabel}`, callback_data: encodeCb(`add_upsell:${s.product_id}`) }]);
         rows.push([{ text: "🧪 Выбор бренда", callback_data: encodeCb("catalog_liquids") }]);
         finalKeyboard = rows.concat(finalKeyboard);
       }
@@ -581,6 +581,13 @@ async function showCart(bot: TelegramBot, chatId: number, user_id: number, messa
       { text: `🗑️`, callback_data: encodeCb(`cart_del:${i.product_id}`) }
     ]);
   }
+  try {
+    const pool = products.filter((x) => x.active && x.category === "liquids" && !items.find((i) => i.product_id === x.product_id));
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+    const pick = pool.slice(0, 2);
+    const unitNext = liquCount >= 2 ? "15.00 €" : "16.00 €";
+    kb.unshift(pick.map((p) => ({ text: `🔥 ${p.title} — ${unitNext}`, callback_data: encodeCb(`add_upsell:${p.product_id}`) })));
+  } catch {}
   kb.push([{ text: `✅ Подтвердить · ${totals.total_with_discount.toFixed(2)} €`, callback_data: encodeCb("confirm_order") }]);
   kb.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
   const text = `<b>Корзина</b> 🛒\n${lines}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\nЭкономия: <b>${savings.toFixed(2)} €</b>` : ""}\n\n💶 Цены: <b>1 → 18€ · 2 → 32€ · 3 → 45€</b>${offer ? `\n${offer}` : ""}`;

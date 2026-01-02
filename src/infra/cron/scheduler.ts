@@ -7,6 +7,8 @@ import { logger } from "../logger";
 import { getBot } from "../../bot/Bot";
 import { updateUser } from "../data";
 import { getBackend, getDefaultCity } from "../backend";
+import { purgeNotIssuedOlderThan } from "../../domain/orders/OrderService";
+import { NOT_ISSUED_DELETE_AFTER_MINUTES } from "../../core/constants";
 
 export async function registerCron() {
   const timezone = "Europe/Berlin";
@@ -136,6 +138,15 @@ export async function registerCron() {
       }
     } catch (e) {
       logger.error("Repair job error", { error: String(e) });
+    }
+  }, { timezone });
+
+  cron.schedule("*/10 * * * *", async () => {
+    try {
+      const n = await purgeNotIssuedOlderThan(NOT_ISSUED_DELETE_AFTER_MINUTES);
+      if (n > 0) logger.info("Purged not_issued orders", { count: n });
+    } catch (e) {
+      logger.error("Purge not_issued error", { error: String(e) });
     }
   }, { timezone });
 }

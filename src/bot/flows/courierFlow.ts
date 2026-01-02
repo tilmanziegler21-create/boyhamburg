@@ -88,11 +88,11 @@ export function registerCourierFlow(bot: TelegramBot) {
     } else if (data.startsWith("courier_not_issued:")) {
       const id = Number(data.split(":")[1]);
       try {
-        const { clearDeliverySlot, getOrderById } = await import("../../domain/orders/OrderService");
-        await clearDeliverySlot(id);
+        const { setNotIssued, getOrderById } = await import("../../domain/orders/OrderService");
+        await setNotIssued(id);
         const order = await getOrderById(id);
         if (order) {
-          try { await bot.sendMessage(order.user_id, "❗ Заказ пока не выдан. Слот освобождён — выберите новое время в ближайшее." ); } catch {}
+          try { await bot.sendMessage(order.user_id, "❗ Заказ не выдан и удалён из очереди. Оформите новый заказ при необходимости." ); } catch {}
         }
         const myList = getDb()
           .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id = ? ORDER BY o.order_id DESC LIMIT 100")

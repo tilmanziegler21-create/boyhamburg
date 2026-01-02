@@ -188,6 +188,30 @@ export async function expireOrder(order_id: number): Promise<void> {
   db.prepare("UPDATE orders SET status = 'expired' WHERE order_id = ?").run(order_id);
 }
 
+export async function setNotIssued(order_id: number): Promise<void> {
+  const db = getDb();
+  const row = db.prepare("SELECT items_json FROM orders WHERE order_id = ?").get(order_id) as { items_json: string } | undefined;
+  if (!row) return;
+  const items: OrderItem[] = JSON.parse(row.items_json || "[]");
+  await releaseReservation(items, order_id);
+  db.prepare("UPDATE orders SET status = 'not_issued', not_issued_timestamp = ? WHERE order_id = ?").run(new Date().toISOString(), order_id);
+}
+
+export async function purgeNotIssuedOlderThan(minutes: number): Promise<number> {
+  const db = getDb();
+  const cutoff = new Date(Date.now() - minutes * 60_000).toISOString();
+  const rows = db.prepare("SELECT order_id FROM orders WHERE status='not_issued' AND not_issued_timestamp <= ?").all(cutoff) as any[];
+  const tx = db.transaction(() => {
+    for (const r of rows) {
+      db.prepare("DELETE FROM reservations WHERE order_id = ?").run(Number(r.order_id));
+      db.prepare("DELETE FROM events WHERE order_id = ?").run(Number(r.order_id));
+      db.prepare("DELETE FROM orders WHERE order_id = ?").run(Number(r.order_id));
+    }
+  });
+  tx();
+  return rows.length;
+}
+
 export async function getOrderById(order_id: number): Promise<Order | null> {
   const db = getDb();
   const row = db

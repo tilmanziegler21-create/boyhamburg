@@ -1,7 +1,7 @@
 import { initDb, getDb } from "../src/infra/db/sqlite";
 import { ensureUser } from "../src/domain/users/UserService";
 import { getProducts, updateProductQty } from "../src/infra/data";
-import { createOrder, confirmOrder, setOrderCourier, setCourierAssigned, setDeliverySlot, setPaymentMethod, setDelivered, getOrderById, clearDeliverySlot } from "../src/domain/orders/OrderService";
+import { createOrder, confirmOrder, setOrderCourier, setCourierAssigned, setDeliverySlot, setPaymentMethod, setDelivered, getOrderById, clearDeliverySlot, setNotIssued, purgeNotIssuedOlderThan } from "../src/domain/orders/OrderService";
 import { getActiveCouriers } from "../src/domain/couriers/CourierService";
 import { generateTimeSlots, validateSlot } from "../src/domain/delivery/DeliveryService";
 
@@ -58,6 +58,26 @@ async function testCancel() {
   ok("Clear slot resets assignment and status");
 }
 
+async function testNotIssuedPurge() {
+  const db = getDb();
+  const cour = (await getActiveCouriers())[0];
+  const products = await getProducts();
+  const p = products.find(p=>p.category==='liquids')!;
+  const userId = 404040;
+  await ensureUser(userId, "qa_user3");
+  const o = await createOrder(userId, [{ product_id: p.product_id, qty: 1, price: 18, is_upsell: false }]);
+  await confirmOrder(o.order_id);
+  await setOrderCourier(o.order_id, cour.tg_id);
+  await setCourierAssigned(o.order_id, cour.tg_id);
+  await setNotIssued(o.order_id);
+  const before = db.prepare("SELECT COUNT(1) AS c FROM orders WHERE status='not_issued'").get() as any;
+  if (!before?.c) throw new Error("not_issued set failed");
+  const n = await purgeNotIssuedOlderThan(0);
+  const after = db.prepare("SELECT COUNT(1) AS c FROM orders WHERE status='not_issued'").get() as any;
+  if (Number(after?.c||0) !== 0 || n < 1) throw new Error("purge not_issued failed");
+  ok("Not issued purge");
+}
+
 async function testStress() {
   const db = getDb();
   const cour = (await getActiveCouriers())[0];
@@ -100,6 +120,7 @@ async function testStress() {
 async function main() {
   try { await testE2E(); } catch (e) { fail("E2E", e); }
   try { await testCancel(); } catch (e) { fail("Cancel", e); }
+  try { await testNotIssuedPurge(); } catch (e) { fail("NotIssued", e); }
   try { await testStress(); } catch (e) { fail("Stress", e); }
 }
 
