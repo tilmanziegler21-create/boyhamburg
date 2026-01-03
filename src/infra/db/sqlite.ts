@@ -34,6 +34,7 @@ export async function initDb() {
       courier_id INTEGER,
       delivery_interval TEXT,
       delivery_exact_time TEXT,
+      delivery_date TEXT,
       payment_method TEXT,
       delivered_timestamp TEXT,
       not_issued_timestamp TEXT,
@@ -92,5 +93,8 @@ export async function initDb() {
   } catch {}
   try {
     db.exec("ALTER TABLE orders ADD COLUMN not_issued_timestamp TEXT");
+  } catch {}
+  try {
+    db.exec("ALTER TABLE orders ADD COLUMN delivery_date TEXT");
   } catch {}
 }

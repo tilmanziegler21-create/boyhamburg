@@ -25,7 +25,8 @@ export type OrderStatus =
   | "courier_assigned"
   | "delivered"
   | "expired"
-  | "cancelled";
+  | "cancelled"
+  | "not_issued";
 
 export type Order = {
   order_id: number;
@@ -40,6 +41,7 @@ export type Order = {
   courier_id: number | null;
   delivery_interval: string | null;
   delivery_exact_time: string | null;
+  delivery_date?: string | null;
   source?: "normal" | "reminder";
 };
 

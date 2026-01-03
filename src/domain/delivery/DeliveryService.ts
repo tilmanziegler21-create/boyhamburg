@@ -25,7 +25,7 @@ export function getOccupiedSlots(courier_tg_id: number, date?: string): Set<stri
   const db = getDb();
   const d = date || formatDate(new Date());
   const rows = db
-    .prepare("SELECT delivery_exact_time FROM orders WHERE courier_id = ? AND status IN ('pending','courier_assigned') AND substr(reserve_timestamp,1,10)=?")
+    .prepare("SELECT delivery_exact_time FROM orders WHERE courier_id = ? AND status IN ('pending','courier_assigned') AND delivery_date = ?")
     .all(courier_tg_id, d) as any[];
   const set = new Set<string>();
   for (const r of rows) if (r.delivery_exact_time) set.add(String(r.delivery_exact_time));

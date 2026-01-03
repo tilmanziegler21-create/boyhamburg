@@ -113,9 +113,9 @@ export async function confirmOrder(order_id: number): Promise<void> {
   });
 }
 
-export async function setDeliverySlot(order_id: number, interval: string, exact_time: string): Promise<void> {
+export async function setDeliverySlot(order_id: number, interval: string, exact_time: string, date?: string): Promise<void> {
   const db = getDb();
-  db.prepare("UPDATE orders SET delivery_interval = ?, delivery_exact_time = ? WHERE order_id = ?").run(interval, exact_time, order_id);
+  db.prepare("UPDATE orders SET delivery_interval = ?, delivery_exact_time = ?, delivery_date = ? WHERE order_id = ?").run(interval, exact_time, date || new Date().toISOString().slice(0,10), order_id);
 }
 
 export async function clearDeliverySlot(order_id: number): Promise<void> {
@@ -216,7 +216,7 @@ export async function getOrderById(order_id: number): Promise<Order | null> {
   const db = getDb();
   const row = db
     .prepare(
-      "SELECT order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, courier_id, delivery_interval, delivery_exact_time, source FROM orders WHERE order_id = ?"
+      "SELECT order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, courier_id, delivery_interval, delivery_exact_time, delivery_date, source FROM orders WHERE order_id = ?"
     )
     .get(order_id) as any;
   if (!row) return null;
@@ -233,6 +233,7 @@ export async function getOrderById(order_id: number): Promise<Order | null> {
     courier_id: row.courier_id != null ? Number(row.courier_id) : null,
     delivery_interval: row.delivery_interval || null,
     delivery_exact_time: row.delivery_exact_time || null,
+    delivery_date: row.delivery_date || null,
     source: row.source || "normal"
   };
 }

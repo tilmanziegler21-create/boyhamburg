@@ -10,6 +10,7 @@ import { env } from "../../infra/config";
 import { encodeCb, decodeCb } from "../cb";
 import { logger } from "../../infra/logger";
 import { getDb } from "../../infra/db/sqlite";
+import { formatDate, addDays } from "../../core/time";
 
 const carts: Map<number, OrderItem[]> = new Map();
 const lastMainMsg: Map<number, number> = new Map();
@@ -436,31 +437,46 @@ export function registerClientFlow(bot: TelegramBot) {
       const courier_tg_id = Number(courierIdStr);
       await setOrderCourier(order_id, courier_tg_id);
       await setCourierAssigned(order_id, courier_tg_id);
-      const couriers = await getActiveCouriers();
-      const chosen = couriers.find((c) => c.tg_id === courier_tg_id);
-      const interval = chosen?.last_delivery_interval || "14-16";
-      const slots = generateTimeSlots(interval);
-      const occupied = getOccupiedSlots(courier_tg_id);
-      const keyboard: TelegramBot.InlineKeyboardButton[][] = [];
-      for (let i = 0; i < Math.min(slots.length, 21); i += 3) {
-        const row: TelegramBot.InlineKeyboardButton[] = [];
-        for (let j = i; j < Math.min(i + 3, slots.length); j++) {
-          const mark = occupied.has(slots[j]) ? "🔴" : "🟢";
-          row.push({ text: `${mark} ${slots[j]}`, callback_data: encodeCb(`select_slot:${order_id}|${slots[j]}`) });
-        }
-        keyboard.push(row);
-      }
-      const backRow: TelegramBot.InlineKeyboardButton[][] = [[{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
-      await bot.editMessageText(`<b>Доставка</b>\nКурьер: ${chosen?.name || "Курьер"}\nИнтервал: ${interval}\nВыберите точное время:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard.concat(backRow) }, parse_mode: "HTML" });
+      const today = formatDate(new Date());
+      const tomorrow = formatDate(addDays(new Date(), 1));
+      const dayAfter = formatDate(addDays(new Date(), 2));
+      const rowsDates: TelegramBot.InlineKeyboardButton[][] = [
+        [{ text: `Сегодня (${today})`, callback_data: encodeCb(`select_date:${order_id}|${today}`) }],
+        [{ text: `Завтра (${tomorrow})`, callback_data: encodeCb(`select_date:${order_id}|${tomorrow}`) }],
+        [{ text: `Послезавтра (${dayAfter})`, callback_data: encodeCb(`select_date:${order_id}|${dayAfter}`) }],
+        [{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }],
+        [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]
+      ];
+      await bot.editMessageText(`<b>Выберите день</b> 📅`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rowsDates }, parse_mode: "HTML" });
     } else if (data.startsWith("back:choose_courier:")) {
       const order_id = Number(data.split(":")[2]);
       const couriers = await getActiveCouriers();
       const rows: TelegramBot.InlineKeyboardButton[][] = couriers.map((c) => [{ text: `${c.name} · ${c.last_delivery_interval}`, callback_data: `choose_courier:${order_id}|${c.tg_id}` }]);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       await bot.editMessageText(`<b>Выберите курьера</b>`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+    } else if (data.startsWith("select_date:")) {
+      const [orderIdStr, dateStr] = data.substring("select_date:".length).split("|");
+      const order_id = Number(orderIdStr);
+      const orderAssigned = await getOrderById(order_id);
+      const couriers = await getActiveCouriers();
+      const chosen = couriers.find((c) => c.tg_id === (orderAssigned?.courier_id || -1));
+      const interval = chosen?.last_delivery_interval || "14-16";
+      const slots = generateTimeSlots(interval);
+      const occupied = chosen ? getOccupiedSlots(chosen.tg_id, dateStr) : new Set<string>();
+      const keyboard: TelegramBot.InlineKeyboardButton[][] = [];
+      for (let i = 0; i < Math.min(slots.length, 21); i += 3) {
+        const row: TelegramBot.InlineKeyboardButton[] = [];
+        for (let j = i; j < Math.min(i + 3, slots.length); j++) {
+          const mark = occupied.has(slots[j]) ? "🔴" : "🟢";
+          row.push({ text: `${mark} ${slots[j]}`, callback_data: encodeCb(`select_slot:${order_id}|${slots[j]}|${dateStr}`) });
+        }
+        keyboard.push(row);
+      }
+      const backRow: TelegramBot.InlineKeyboardButton[][] = [[{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
+      await bot.editMessageText(`<b>Доставка</b>\nДень: ${dateStr}\nИнтервал: ${interval}\nВыберите точное время:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard.concat(backRow) }, parse_mode: "HTML" });
     } else if (data.startsWith("select_slot:")) {
       const payload = data.substring("select_slot:".length);
-      const [orderIdStr, time] = payload.split("|");
+      const [orderIdStr, time, dateStr] = payload.split("|");
       const order_id = Number(orderIdStr);
       const couriers = await getActiveCouriers();
       const orderAssigned = await getOrderById(order_id);
@@ -471,29 +487,29 @@ export function registerClientFlow(bot: TelegramBot) {
         await bot.editMessageText("<b>Слот недоступен</b>. Выберите другой.", { chat_id: chatId, message_id: messageId, parse_mode: "HTML" });
         return;
       }
-      const isFree = chosen ? !getOccupiedSlots(chosen.tg_id).has(time) : true;
+      const isFree = chosen ? !getOccupiedSlots(chosen.tg_id, dateStr).has(time) : true;
       if (!isFree) {
-        const occ = chosen ? getOccupiedSlots(chosen.tg_id) : new Set<string>();
+        const occ = chosen ? getOccupiedSlots(chosen.tg_id, dateStr) : new Set<string>();
         const slots2 = generateTimeSlots(interval);
         const keyboard2: TelegramBot.InlineKeyboardButton[][] = [];
         for (let i = 0; i < Math.min(slots2.length, 21); i += 3) {
           const row: TelegramBot.InlineKeyboardButton[] = [];
           for (let j = i; j < Math.min(i + 3, slots2.length); j++) {
             const mark = occ.has(slots2[j]) ? "🔴" : "🟢";
-            row.push({ text: `${mark} ${slots2[j]}`, callback_data: encodeCb(`select_slot:${order_id}|${slots2[j]}`) });
+            row.push({ text: `${mark} ${slots2[j]}`, callback_data: encodeCb(`select_slot:${order_id}|${slots2[j]}|${dateStr}`) });
           }
           keyboard2.push(row);
         }
-        const backRow2: TelegramBot.InlineKeyboardButton[][] = [[{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
+        const backRow2: TelegramBot.InlineKeyboardButton[][] = [[{ text: "⬅️ Назад", callback_data: encodeCb(`select_date:${order_id}|${dateStr}`) }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
         await bot.editMessageText(`<b>Слот занят</b>. Выберите другой.`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard2.concat(backRow2) }, parse_mode: "HTML" });
         return;
       }
-      await setDeliverySlot(order_id, interval, time);
+      await setDeliverySlot(order_id, interval, time, dateStr);
       const payKb: TelegramBot.InlineKeyboardButton[][] = [
         [{ text: "💳 Оплата картой", callback_data: encodeCb(`pay:${order_id}|card`) }],
         [{ text: "💵 Наличные", callback_data: encodeCb(`pay:${order_id}|cash`) }]
       ];
-      await bot.editMessageText(`✅ <b>Время доставки</b>: ${time}\nИнтервал: ${interval}\nВыберите способ оплаты:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
+      await bot.editMessageText(`✅ <b>Время доставки</b>: ${time}\nДень: ${dateStr}\nИнтервал: ${interval}\nВыберите способ оплаты:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
       const order = await getOrderById(order_id);
       const products = await getProducts();
       const lines = (order?.items || []).map((i) => {
@@ -516,7 +532,7 @@ export function registerClientFlow(bot: TelegramBot) {
             const { isOrderInPromo } = await import("../../domain/promo/PromoService");
             if (ord && isOrderInPromo(ord.reserve_timestamp)) promoMark = " · скидка 10%";
           } catch {}
-          await bot.sendMessage(notifyTgId, `📦 Новый заказ #${order_id} (не выдан${promoMark})\nКлиент: ${uname}\nИнтервал: ${interval}\nВремя: ${time}\n\n${lines}`, { reply_markup: { inline_keyboard: courierKeyboard }, parse_mode: "HTML" });
+          await bot.sendMessage(notifyTgId, `📦 Новый заказ #${order_id} (не выдан${promoMark})\nКлиент: ${uname}\nДень: ${dateStr}\nИнтервал: ${interval}\nВремя: ${time}\n\n${lines}`, { reply_markup: { inline_keyboard: courierKeyboard }, parse_mode: "HTML" });
         } catch {}
       }
       // Контакт для локации будет отправлен после выбора оплаты
