@@ -8,9 +8,13 @@ import { logger } from "../../infra/logger";
 export function registerCourierFlow(bot: TelegramBot) {
   bot.onText(/\/courier/, async (msg) => {
     const chatId = msg.chat.id;
-    const myList = getDb()
-      .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id = ? ORDER BY o.order_id DESC LIMIT 100")
-      .all(msg.from?.id) as any[];
+    const db = getDb();
+    const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(msg.from?.id, msg.from?.id) as any;
+    const idA = Number(map?.tg_id || msg.from?.id);
+    const idB = Number(map?.courier_id || msg.from?.id);
+    const myList = db
+      .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id IN (?, ?) ORDER BY o.order_id DESC LIMIT 100")
+      .all(idA, idB) as any[];
     const lines = myList.map((o) => `#${o.order_id} ${o.username ? "@" + o.username : "Клиент"} · ${o.delivery_exact_time || "?"}`);
     const keyboard = myList.map((o) => [
       { text: `Выдача ${o.order_id}`, callback_data: encodeCb(`courier_issue:${o.order_id}`) },
@@ -46,9 +50,13 @@ export function registerCourierFlow(bot: TelegramBot) {
         try { await bot.editMessageText(`Заказ #${id} выдан`, { chat_id: chatId, message_id: q.message?.message_id as number }); } catch {}
       }
       try {
-        const myList = getDb()
-          .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id = ? ORDER BY o.order_id DESC LIMIT 100")
-          .all(q.from.id) as any[];
+        const db = getDb();
+        const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(q.from.id, q.from.id) as any;
+        const idA = Number(map?.tg_id || q.from.id);
+        const idB = Number(map?.courier_id || q.from.id);
+        const myList = db
+          .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id IN (?, ?) ORDER BY o.order_id DESC LIMIT 100")
+          .all(idA, idB) as any[];
         const lines2 = myList.map((o) => `#${o.order_id} ${o.username ? "@" + o.username : "Клиент"} · ${o.delivery_exact_time || "?"}`);
         const keyboard2 = myList.map((o) => [
           { text: `Выдача ${o.order_id}`, callback_data: encodeCb(`courier_issue:${o.order_id}`) },
@@ -94,9 +102,13 @@ export function registerCourierFlow(bot: TelegramBot) {
         if (order) {
           try { await bot.sendMessage(order.user_id, "❗ Заказ не выдан и удалён из очереди. Оформите новый заказ при необходимости." ); } catch {}
         }
-        const myList = getDb()
-          .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id = ? ORDER BY o.order_id DESC LIMIT 100")
-          .all(q.from.id) as any[];
+        const db0 = getDb();
+        const map0 = db0.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(q.from.id, q.from.id) as any;
+        const idA0 = Number(map0?.tg_id || q.from.id);
+        const idB0 = Number(map0?.courier_id || q.from.id);
+        const myList = db0
+          .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id IN (?, ?) ORDER BY o.order_id DESC LIMIT 100")
+          .all(idA0, idB0) as any[];
         const lines2 = myList.map((o) => `#${o.order_id} ${o.username ? "@" + o.username : "Клиент"} · ${o.delivery_exact_time || "?"}`);
         const keyboard2 = myList.map((o) => [
           { text: `Выдача ${o.order_id}`, callback_data: encodeCb(`courier_issue:${o.order_id}`) },
