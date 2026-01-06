@@ -9,7 +9,8 @@
     "dev": "ts-node src/index.ts",
     "start:prod": "npm run build && node dist/index.js",
     "sa:extract": "node scripts/sa-extract.js",
-    "qa": "ts-node scripts/qa.ts"
+    "qa": "ts-node scripts/qa.ts",
+    "migrate:delivered_ms": "ts-node scripts/migrate_delivered_ms.ts"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.0",

@@ -92,6 +92,12 @@ export async function initDb() {
     db.exec("ALTER TABLE orders ADD COLUMN delivered_timestamp TEXT");
   } catch {}
   try {
+    db.exec("ALTER TABLE orders ADD COLUMN delivered_at_ms INTEGER");
+  } catch {}
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_orders_delivered_at_ms ON orders(delivered_at_ms)");
+  } catch {}
+  try {
     db.exec("ALTER TABLE orders ADD COLUMN not_issued_timestamp TEXT");
   } catch {}
   try {

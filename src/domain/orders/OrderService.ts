@@ -158,8 +158,9 @@ export async function setDelivered(order_id: number, courier_tg_id: number): Pro
   const items: OrderItem[] = JSON.parse(row.items_json);
   await finalDeduction(items);
   await releaseReservation(items, order_id);
-  const nowIso = new Date().toISOString();
-  db.prepare("UPDATE orders SET status = 'delivered', delivered_timestamp = ? WHERE order_id = ?").run(nowIso, order_id);
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  db.prepare("UPDATE orders SET status = 'delivered', delivered_timestamp = ?, delivered_at_ms = ? WHERE order_id = ?").run(nowIso, nowMs, order_id);
   try {
     const total = items.reduce((s, it) => s + Number(it.price) * Number(it.qty), 0);
     db

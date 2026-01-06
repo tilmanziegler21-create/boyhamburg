@@ -47,7 +47,9 @@ export async function registerCron() {
       const db = getDb();
       const bot = getBot();
       const today = new Date().toISOString().slice(0,10);
-      const rows = db.prepare("SELECT items_json, payment_method FROM orders WHERE status='delivered' AND substr(delivered_timestamp,1,10)=?").all(today) as any[];
+      const start = Date.parse(`${today}T00:00:00.000Z`);
+      const end = start + 86400000;
+      const rows = db.prepare("SELECT items_json, payment_method FROM orders WHERE status='delivered' AND ((delivered_at_ms >= ? AND delivered_at_ms < ?) OR (delivered_at_ms IS NULL AND substr(delivered_timestamp,1,10)=?))").all(start, end, today) as any[];
       const { getProducts } = await import("../data");
       const products = await getProducts();
       const byBrand: Record<string, string[]> = {};
