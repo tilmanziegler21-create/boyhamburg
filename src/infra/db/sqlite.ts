@@ -103,4 +103,16 @@ export async function initDb() {
   try {
     db.exec("ALTER TABLE orders ADD COLUMN delivery_date TEXT");
   } catch {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS upsell_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        timestamp INTEGER NOT NULL
+      );
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_upsell_events_timestamp ON upsell_events(timestamp)");
+  } catch {}
 }

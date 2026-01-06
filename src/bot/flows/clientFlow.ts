@@ -14,6 +14,8 @@ import { formatDate, addDays } from "../../core/time";
 
 const carts: Map<number, OrderItem[]> = new Map();
 const lastMainMsg: Map<number, number> = new Map();
+const upsellRerolls: Map<number, number> = new Map();
+const upsellShown: Map<number, Set<number>> = new Map();
 
 function fmtMoney(n: number) {
   return `${n.toFixed(2)} €`;
@@ -293,7 +295,11 @@ export function registerClientFlow(bot: TelegramBot) {
         const available = productsAll.filter((x) => x.active && x.category === "liquids" && !items.find((i) => i.product_id === x.product_id));
         for (let i = available.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = available[i]; available[i] = available[j]; available[j] = t; }
         const pick = available.slice(0, 2);
-        try { getDb().prepare("INSERT INTO events(date, type, user_id, payload) VALUES (?,?,?,?)").run(new Date().toISOString(), "upsell_offer", user_id, JSON.stringify({ suggestions: pick.map(x=>x.product_id) })); } catch {}
+        try {
+          const dbx = getDb();
+          dbx.prepare("INSERT INTO events(date, type, user_id, payload) VALUES (?,?,?,?)").run(new Date().toISOString(), "upsell_offer", user_id, JSON.stringify({ suggestions: pick.map(x=>x.product_id) }));
+          for (const s of pick) dbx.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, s.product_id, "offered", Date.now());
+        } catch {}
         let liquCount = 0; for (const it of items) { const ip = products.find((x) => x.product_id === it.product_id); if (ip && ip.category === "liquids") liquCount += it.qty; }
         const nextLabel = liquCount >= 2 ? "15.00 €" : "16.00 €";
         const rows: { text: string; callback_data: string }[][] = pick.map((s) => [{ text: `➕ ${s.title} — ${nextLabel}`, callback_data: encodeCb(`add_upsell:${s.product_id}`) }]);
@@ -311,6 +317,12 @@ export function registerClientFlow(bot: TelegramBot) {
       } catch {
         await bot.sendMessage(chatId, outText, { reply_markup: { inline_keyboard: finalKeyboard }, parse_mode: "HTML" });
       }
+      // Gamified upsell for liquids
+      if (p.category === "liquids") {
+        try {
+          await showGamifiedUpsell(bot, chatId, user_id, "liquids", new Set((items||[]).map(i=>i.product_id)));
+        } catch {}
+      }
     } else if (data === "show_upsell") {
       const products = await refreshProductsCache();
       const cart = carts.get(user_id) || [];
@@ -323,14 +335,18 @@ export function registerClientFlow(bot: TelegramBot) {
       const rows: { text: string; callback_data: string }[][] = sug.slice(0, 3).map((p) => [{ text: `🔥 Добавить вкус: ${p.title} · ${p.category === "liquids" ? "16.00 €" : fmtMoney(p.price)}`, callback_data: `add_upsell:${p.product_id}` }]);
       rows.push([{ text: "🧴 Добавить ещё жидкости", callback_data: encodeCb("catalog_liquids") }]);
       await bot.editMessageText("<b>Рекомендуем дополнительно</b> ⭐", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
-  } else if (data.startsWith("add_upsell:")) {
+    } else if (data.startsWith("add_upsell:")) {
     const pid = Number(data.split(":")[1]);
     const products = await getProducts();
     const p = products.find((x) => x.product_id === pid);
     if (!p) return;
     const price = p.category === "liquids" ? 16 : p.price;
     addToCart(user_id, p, true, price);
-    try { getDb().prepare("INSERT INTO events(date, type, user_id, payload) VALUES (?,?,?,?)").run(new Date().toISOString(), "upsell_accept", user_id, JSON.stringify({ product_id: pid, price })); } catch {}
+    try {
+      const dbx = getDb();
+      dbx.prepare("INSERT INTO events(date, type, user_id, payload) VALUES (?,?,?,?)").run(new Date().toISOString(), "upsell_accept", user_id, JSON.stringify({ product_id: pid, price }));
+      dbx.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, pid, "accepted", Date.now());
+    } catch {}
     const items = carts.get(user_id) || [];
     const label = p.category === "liquids" ? "16.00 €" : fmtMoney(p.price);
     const totals = await previewTotals(user_id, items);
@@ -359,13 +375,17 @@ export function registerClientFlow(bot: TelegramBot) {
     } catch {
       await bot.sendMessage(chatId, `<b>Добавлено в апсел</b>: ${p.title} — ${label}\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings2 > 0 ? ` · Экономия: ${savings2.toFixed(2)} €` : ""}`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     }
-  } else if (data.startsWith("add_upsell_discount10:")) {
+    } else if (data.startsWith("add_upsell_discount10:")) {
     const pid = Number(data.split(":")[1]);
     const products = await getProducts();
     const p = products.find((x) => x.product_id === pid);
     if (!p) return;
     addToCart(user_id, p, true);
-    try { getDb().prepare("INSERT INTO events(date, type, user_id, payload) VALUES (?,?,?,?)").run(new Date().toISOString(), "upsell_accept", user_id, JSON.stringify({ product_id: pid, price: p.price })); } catch {}
+    try {
+      const dbx = getDb();
+      dbx.prepare("INSERT INTO events(date, type, user_id, payload) VALUES (?,?,?,?)").run(new Date().toISOString(), "upsell_accept", user_id, JSON.stringify({ product_id: pid, price: p.price }));
+      dbx.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, pid, "accepted", Date.now());
+    } catch {}
     const items = carts.get(user_id) || [];
     const totals = await previewTotals(user_id, items);
     let savings3 = 0;
@@ -554,6 +574,39 @@ export function registerClientFlow(bot: TelegramBot) {
       } catch {
         await bot.sendMessage(chatId, `📍 Попросите у курьера локацию точки выдачи.`, { reply_markup: { inline_keyboard: [[{ text: "✉️ Связь @elfovadim", url: "https://t.me/elfovadim" }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]] }, parse_mode: "HTML" });
       }
+    } else if (data.startsWith("gam_upsell_add:")) {
+      const pid = Number(data.split(":")[1]);
+      const products = await getProducts();
+      const p = products.find((x) => x.product_id === pid);
+      if (!p) return;
+      const price = p.category === "liquids" ? (await currentUnitPrice(user_id, products)) : p.price;
+      addToCart(user_id, p, true, price);
+      try {
+        const dbx = getDb();
+        dbx.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, pid, "accepted", Date.now());
+      } catch {}
+      const items = carts.get(user_id) || [];
+      const totals = await previewTotals(user_id, items);
+      const savingsNow = computeSavings(items, products);
+      const msg = `✅ ${p.title} добавлен!\n\n💰 Итог: ${totals.total_with_discount.toFixed(2)} €${savingsNow>0?`\n💚 Экономия: ${savingsNow.toFixed(2)} €`:''}`;
+      try { await bot.sendMessage(chatId, msg, { parse_mode: "HTML" }); } catch {}
+      // reset rerolls and show next upsell cycle (limit overall to 5)
+      const totalUpsells = items.reduce((s,i)=>s+(i.is_upsell?i.qty:0),0);
+      upsellRerolls.set(user_id, 0);
+      const exclude = new Set(items.map(i=>i.product_id));
+      if (p.category === "liquids" && totalUpsells < 5) {
+        try { await showGamifiedUpsell(bot, chatId, user_id, "liquids", exclude); } catch {}
+      }
+    } else if (data.startsWith("gam_upsell_reroll:")) {
+      const category = data.split(":")[1];
+      const cur = upsellRerolls.get(user_id) || 0;
+      upsellRerolls.set(user_id, cur + 1);
+      try { getDb().prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, 0, "reroll", Date.now()); } catch {}
+      const items = carts.get(user_id) || [];
+      const exclude = new Set(items.map(i=>i.product_id));
+      const shownSet = upsellShown.get(user_id) || new Set<number>();
+      for (const s of shownSet) exclude.add(s);
+      await showGamifiedUpsell(bot, chatId, user_id, category, exclude);
     }
   });
 }
@@ -609,4 +662,75 @@ async function showCart(bot: TelegramBot, chatId: number, user_id: number, messa
   const text = `<b>Корзина</b> 🛒\n${lines}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\nЭкономия: <b>${savings.toFixed(2)} €</b>` : ""}\n\n💶 Цены: <b>1 → 18€ · 2 → 32€ · 3 → 45€</b>${offer ? `\n${offer}` : ""}`;
   if (typeof messageId === "number") await bot.editMessageText(text, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: kb }, parse_mode: "HTML" });
   else await bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: kb }, parse_mode: "HTML" });
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+async function showGamifiedUpsell(bot: TelegramBot, chatId: number, user_id: number, category: string, exclude: Set<number>) {
+  const rerollCount = upsellRerolls.get(user_id) || 0;
+  if (rerollCount >= 3) {
+    const kb: TelegramBot.InlineKeyboardButton[][] = [[{ text: "🛒 Перейти в корзину", callback_data: encodeCb("cart_open") }]];
+    await bot.sendMessage(chatId, "🔥 Отличный выбор!", { reply_markup: { inline_keyboard: kb } });
+    return;
+  }
+  const all = await refreshProductsCache();
+  const items = carts.get(user_id) || [];
+  const inCart = new Set(items.map(i=>i.product_id));
+  const pool = all.filter(p => p.active && p.category === category && !inCart.has(p.product_id) && !exclude.has(p.product_id));
+  if (pool.length < 2) {
+    const kb: TelegramBot.InlineKeyboardButton[][] = [[{ text: "🛒 Перейти в корзину", callback_data: encodeCb("cart_open") }]];
+    await bot.sendMessage(chatId, "🔥 Отличный выбор!", { reply_markup: { inline_keyboard: kb } });
+    return;
+  }
+  const pick = shuffle(pool).slice(0, 2);
+  const shown = upsellShown.get(user_id) || new Set<number>();
+  for (const s of pick) shown.add(s.product_id);
+  upsellShown.set(user_id, shown);
+  try {
+    const dbx = getDb();
+    for (const s of pick) dbx.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, s.product_id, "offered", Date.now());
+  } catch {}
+  const rerollsLeft = 3 - rerollCount;
+  const msg = `🎲 Попробуй эти вкусы:\n\n🎰 Рероллов осталось: ${rerollsLeft}`;
+  const unitNext = (() => {
+    let liquCount = 0;
+    for (const it of items) {
+      const p = all.find((x)=>x.product_id===it.product_id);
+      if (p && p.category === "liquids") liquCount += it.qty;
+    }
+    return liquCount >= 2 ? "15.00 €" : "16.00 €";
+  })();
+  const kb: TelegramBot.InlineKeyboardButton[][] = [
+    [{ text: `💧 ${pick[0].title} — ${category==="liquids"?unitNext:fmtMoney(pick[0].price)}`, callback_data: encodeCb(`gam_upsell_add:${pick[0].product_id}`) }],
+    [{ text: `💧 ${pick[1].title} — ${category==="liquids"?unitNext:fmtMoney(pick[1].price)}`, callback_data: encodeCb(`gam_upsell_add:${pick[1].product_id}`) }]
+  ];
+  if (rerollCount < 3) kb.push([{ text: "🎲 Реролл (другие вкусы)", callback_data: encodeCb(`gam_upsell_reroll:${category}`) }]);
+  kb.push([{ text: "🛒 Перейти в корзину", callback_data: encodeCb("cart_open") }]);
+  await bot.sendMessage(chatId, msg, { reply_markup: { inline_keyboard: kb } });
+}
+
+async function currentUnitPrice(user_id: number, products: Product[]): Promise<number> {
+  const items = carts.get(user_id) || [];
+  let liquCount = 0;
+  for (const it of items) {
+    const p = products.find((x)=>x.product_id===it.product_id);
+    if (p && p.category === "liquids") liquCount += it.qty;
+  }
+  return liquCount >= 2 ? 15 : 16;
+}
+
+function computeSavings(items: OrderItem[], products: Product[]): number {
+  let s = 0;
+  for (const it of items) {
+    const ip = products.find((x)=>x.product_id===it.product_id);
+    if (ip && ip.category === "liquids" && it.price < 18) s += (18 - it.price) * it.qty;
+  }
+  return Math.round(s * 100) / 100;
 }

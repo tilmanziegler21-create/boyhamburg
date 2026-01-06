@@ -52,9 +52,21 @@ export async function registerCron() {
       const rows = db.prepare("SELECT items_json, payment_method FROM orders WHERE status='delivered' AND ((delivered_at_ms >= ? AND delivered_at_ms < ?) OR (delivered_at_ms IS NULL AND substr(delivered_timestamp,1,10)=?))").all(start, end, today) as any[];
       const { getProducts } = await import("../data");
       const products = await getProducts();
-      const byBrand: Record<string, string[]> = {};
+      const byBrand: Record<string, { name: string; qty: number; unit: number }[]> = {};
       const cashTotals: number[] = [];
       const cardTotals: number[] = [];
+      let upsellOffered = 0;
+      let upsellAccepted = 0;
+      let upsellRerolls = 0;
+      let upsellAcceptedRevenue = 0;
+      try {
+        const offeredRows = db.prepare("SELECT COUNT(1) AS c FROM upsell_events WHERE event_type='offered' AND timestamp >= ? AND timestamp < ?").get(start, end) as any;
+        const acceptedRows = db.prepare("SELECT COUNT(1) AS c FROM upsell_events WHERE event_type='accepted' AND timestamp >= ? AND timestamp < ?").get(start, end) as any;
+        const rerollRows = db.prepare("SELECT COUNT(1) AS c FROM upsell_events WHERE event_type='reroll' AND timestamp >= ? AND timestamp < ?").get(start, end) as any;
+        upsellOffered = Number(offeredRows?.c || 0);
+        upsellAccepted = Number(acceptedRows?.c || 0);
+        upsellRerolls = Number(rerollRows?.c || 0);
+      } catch {}
       for (const r of rows) {
         const pm = String(r.payment_method || '').toLowerCase() === 'card' ? 'card' : 'cash';
         let orderSum = 0;
@@ -64,9 +76,12 @@ export async function registerCron() {
           if (!p) continue;
           const brand = p.brand ? p.brand : (p.category === 'electronics' ? 'ELECTRONICS' : 'LIQUIDS');
           const arr = byBrand[brand] || [];
-          for (let k = 0; k < Number(i.qty); k++) arr.push(`- ${p.title} (${Number(i.price).toFixed(1)}€)`);
+          const existing = arr.find((x) => x.name === p.title && x.unit === Number(i.price));
+          if (existing) existing.qty += Number(i.qty);
+          else arr.push({ name: p.title, qty: Number(i.qty), unit: Number(i.price) });
           byBrand[brand] = arr;
           orderSum += Number(i.price) * Number(i.qty);
+          if (i.is_upsell) upsellAcceptedRevenue += Number(i.price) * Number(i.qty);
         }
         if (pm === 'cash') cashTotals.push(orderSum); else cardTotals.push(orderSum);
       }
@@ -78,7 +93,7 @@ export async function registerCron() {
       for (const b of brandOrder) {
         lines.push('');
         lines.push(b);
-        for (const row of byBrand[b]) lines.push(row);
+        for (const row of byBrand[b]) lines.push(`• ${row.name} × ${row.qty} (${row.unit.toFixed(2)}€/шт) = ${(row.unit*row.qty).toFixed(2)}€`);
       }
       const sumCash = cashTotals.reduce((s,n)=>s+n,0);
       const sumCard = cardTotals.reduce((s,n)=>s+n,0);
@@ -90,6 +105,13 @@ export async function registerCron() {
       lines.push(`Card: ${cardTotals.map(n=>`${n.toFixed(0)}€`).join(' + ') || '0€'}`);
       lines.push('');
       lines.push(`Итого за день: ${sumAll.toFixed(0)} евро общая, ${sumCash.toFixed(0)} кэш ${sumCard.toFixed(0)} карта`);
+      if (upsellOffered > 0 || upsellAcceptedRevenue > 0) {
+        lines.push('');
+        const effectiveOffers = Math.max(upsellOffered - upsellRerolls, 1);
+        const conv = Math.round((upsellAccepted / effectiveOffers) * 1000) / 10;
+        lines.push(`Upsell (геймификация): предложено ${upsellOffered}, рероллов ${upsellRerolls}, принято ${upsellAccepted}, конверсия ${conv}%`);
+        lines.push(`Доп. выручка: ${(upsellAcceptedRevenue).toFixed(2)}€`);
+      }
       const adminIds = (process.env.TELEGRAM_ADMIN_IDS || '').split(',').map(s=>Number(s.trim())).filter(x=>x);
       for (const id of adminIds) {
         try { await bot.sendMessage(id, lines.join('\n')); } catch {}

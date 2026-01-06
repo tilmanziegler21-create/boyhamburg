@@ -7,7 +7,9 @@ import { getProducts } from "../../infra/data";
 
 export async function computeDailyMetrics(date: string): Promise<MetricsRow> {
   const db = getDb();
-  const delivered = db.prepare("SELECT total_with_discount, items_json, source FROM orders WHERE status='delivered' AND substr(delivered_timestamp,1,10)=?").all(date) as any[];
+  const start = Date.parse(`${date}T00:00:00.000Z`);
+  const end = start + 86400000;
+  const delivered = db.prepare("SELECT total_with_discount, items_json, source FROM orders WHERE status='delivered' AND ((delivered_at_ms >= ? AND delivered_at_ms < ?) OR (delivered_at_ms IS NULL AND substr(delivered_timestamp,1,10)=?))").all(start, end, date) as any[];
   const orders = delivered.length;
   const revenue = delivered.reduce((s, r) => s + Number(r.total_with_discount), 0);
   const avg_check = orders > 0 ? Math.round((revenue / orders) * 100) / 100 : 0;
@@ -28,7 +30,10 @@ export async function computeDailyMetrics(date: string): Promise<MetricsRow> {
       else if (p.category === "electronics") electronics_sales += i.qty;
     }
   }
-  const yRow = db.prepare("SELECT SUM(total_with_discount) AS rev FROM orders WHERE status='delivered' AND substr(delivered_timestamp,1,10)=?").get(previousDate(date)) as any;
+  const prev = previousDate(date);
+  const prevStart = Date.parse(`${prev}T00:00:00.000Z`);
+  const prevEnd = prevStart + 86400000;
+  const yRow = db.prepare("SELECT SUM(total_with_discount) AS rev FROM orders WHERE status='delivered' AND ((delivered_at_ms >= ? AND delivered_at_ms < ?) OR (delivered_at_ms IS NULL AND substr(delivered_timestamp,1,10)=?))").get(prevStart, prevEnd, prev) as any;
   const revenue_yesterday = Number(yRow?.rev || 0);
   const growth_percent = Math.round(((revenue - revenue_yesterday) / Math.max(revenue_yesterday, 1)) * 10000) / 100;
   const upsell_clicks = db.prepare("SELECT COUNT(1) AS c FROM events WHERE substr(date,1,10)=? AND type='upsell_click'").get(date) as any;

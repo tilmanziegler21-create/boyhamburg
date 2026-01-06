@@ -1,9 +1,11 @@
-node_modules/
+# macOS artifacts
+.DS_Store
+
+# Archives and build outputs
+*.tar.gz
 dist/
+node_modules/
 data/
 .env
-.env.*
+.env.sa
 service-account.json
-secrets/
-.DS_Store
-*.log
