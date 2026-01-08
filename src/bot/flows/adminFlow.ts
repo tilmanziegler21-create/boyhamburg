@@ -1,10 +1,13 @@
 import TelegramBot from "node-telegram-bot-api";
 import { decodeCb } from "../cb";
 import { env } from "../../infra/config";
+import { shopConfig } from "../../config/shopConfig";
 import { getProducts, getCouriers, updateProductPrice, updateCourier, updateUser } from "../../infra/data";
 import { generateDailyReportCSV, generateCouriersCSV, generateOrdersCSV } from "../../domain/metrics/CSVExport";
 import fs from "fs";
 import { getDb } from "../../infra/db/sqlite";
+import { ReportService } from "../../services/ReportService";
+import { getDefaultCity } from "../../infra/backend";
 
 function isAdmin(id: number) {
   const list = (env.TELEGRAM_ADMIN_IDS || "").split(",").map((s) => Number(s.trim())).filter((x) => x);
@@ -189,50 +192,28 @@ export function registerAdminFlow(bot: TelegramBot) {
         }
       }
   } else if (finalData === "admin_report_today") {
-      const db = getDb();
-      const products = await getProducts();
-      const today = new Date().toISOString().slice(0,10);
-      const delivered = db.prepare("SELECT items_json, payment_method, delivered_timestamp FROM orders WHERE status='delivered' AND substr(delivered_timestamp,1,10)=?").all(today) as any[];
-      const byBrand: Record<string, string[]> = {};
-      const cashTotals: number[] = [];
-      const cardTotals: number[] = [];
-      for (const r of delivered) {
-        const pm = String(r.payment_method || '').toLowerCase() === 'card' ? 'card' : 'cash';
-        let orderSum = 0;
-        const items = JSON.parse(r.items_json || '[]');
-        for (const i of items) {
-          const p = products.find((x) => x.product_id === i.product_id);
-          if (!p) continue;
-          const brand = p.brand ? p.brand : (p.category === 'electronics' ? 'ELECTRONICS' : 'LIQUIDS');
-          const arr = byBrand[brand] || [];
-          for (let k = 0; k < Number(i.qty); k++) arr.push(`- ${p.title} (${Number(i.price).toFixed(1)}€)`);
-          byBrand[brand] = arr;
-          orderSum += Number(i.price) * Number(i.qty);
+      try {
+        const city = shopConfig.cityCode || getDefaultCity();
+        const rs = new ReportService();
+        const report = await rs.getTodayReport(city);
+        let message = `📊 <b>Отчёт за сегодня (${report.date})</b>\n\n`;
+        message += `🏪 Магазин: ${shopConfig.shopName}\n`;
+        message += `🏙 Город: ${city}\n`;
+        message += `📦 Заказов: ${report.orders}\n`;
+        message += `💰 Выручка: ${report.revenue.toFixed(2)}€\n`;
+        message += `💵 Доля (5%): ${report.yourShare.toFixed(2)}€\n`;
+        message += `🔥 Топ товар: ${report.topItem}\n\n`;
+        if (report.orders > 0) {
+          message += `<b>Продано товаров:</b>\n`;
+          for (const [name, count] of Object.entries(report.itemsSold || {})) {
+            message += `• ${name}: ${count} шт\n`;
+          }
         }
-        if (pm === 'cash') cashTotals.push(orderSum); else cardTotals.push(orderSum);
+        const kb = [[{ text: "⬅️ Назад", callback_data: "admin_back" }]];
+        await bot.sendMessage(chatId, message, { reply_markup: { inline_keyboard: kb }, parse_mode: "HTML" });
+      } catch (error) {
+        await bot.sendMessage(chatId, "❌ Ошибка загрузки отчёта");
       }
-      const dd = new Date();
-      const dateLabel = `${String(dd.getDate()).padStart(2,'0')}.${String(dd.getMonth()+1).padStart(2,'0')}`;
-      const lines: string[] = [];
-      lines.push(dateLabel);
-      const brandOrder = Object.keys(byBrand);
-      for (const b of brandOrder) {
-        lines.push('');
-        lines.push(b);
-        for (const row of byBrand[b]) lines.push(row);
-      }
-      const sumCash = cashTotals.reduce((s,n)=>s+n,0);
-      const sumCard = cardTotals.reduce((s,n)=>s+n,0);
-      const sumAll = sumCash + sumCard;
-      const cashExpr = cashTotals.length ? `(${cashTotals[0].toFixed(0)}€)` + (cashTotals.slice(1).length ? 
-        cashTotals.slice(1).map(n=>`+ ${n.toFixed(0)}€`).join(' ') : '') : '0€';
-      lines.push('');
-      lines.push(`Cash: ${cashExpr}`);
-      lines.push(`Card: ${cardTotals.map(n=>`${n.toFixed(0)}€`).join(' + ') || '0€'}`);
-      lines.push('');
-      lines.push(`Итого за день: ${sumAll.toFixed(0)} евро общая, ${sumCash.toFixed(0)} кэш ${sumCard.toFixed(0)} карта`);
-      const kb = [[{ text: "⬅️ Назад", callback_data: "admin_back" }]];
-      await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: kb } });
     } else if (finalData === "admin_export") {
       const file = "data/report.csv";
       await generateDailyReportCSV(file, 7);
@@ -274,8 +255,9 @@ export function registerAdminFlow(bot: TelegramBot) {
         const { useSheets } = await import("../../infra/config");
         if (useSheets) {
           const { clear } = await import("../../infra/sheets/SheetsClient");
-          await clear("orders_FFM!A:Z");
-          await clear("metrics_FFM!A:Z");
+          const city = shopConfig.cityCode || getDefaultCity();
+          await clear(`orders_${city}!A:Z`);
+          await clear(`metrics_${city}!A:Z`);
         }
       } catch {}
       await bot.sendMessage(chatId, "Сброс выполнен: заказы и метрики очищены");

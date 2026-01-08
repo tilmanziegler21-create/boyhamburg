@@ -7,14 +7,18 @@ import { createOrder, confirmOrder, setDeliverySlot, getOrderById, previewTotals
 import { getActiveCouriers } from "../../domain/couriers/CourierService";
 import { generateTimeSlots, validateSlot, getOccupiedSlots, isSlotAvailable } from "../../domain/delivery/DeliveryService";
 import { env } from "../../infra/config";
+import { shopConfig } from "../../config/shopConfig";
 import { encodeCb, decodeCb } from "../cb";
 import { logger } from "../../infra/logger";
 import { getDb } from "../../infra/db/sqlite";
 import { formatDate, addDays } from "../../core/time";
+import { carts as cartsStore, userStates, userRerollCount } from "../../infra/storage/InMemoryStorage";
+import { showHybridUpsellWithGuidance } from "../handlers/fortuneHandler";
+import { showUpsellCatalog } from "../handlers/catalogHandler";
 
-const carts: Map<number, OrderItem[]> = new Map();
+const carts: Map<number, OrderItem[]> = cartsStore as Map<number, OrderItem[]>;
 const lastMainMsg: Map<number, number> = new Map();
-const upsellRerolls: Map<number, number> = new Map();
+const upsellRerolls: Map<number, number> = userRerollCount as Map<number, number>;
 const upsellShown: Map<number, Set<number>> = new Map();
 
 function fmtMoney(n: number) {
@@ -65,11 +69,11 @@ export function registerClientFlow(bot: TelegramBot) {
     const username = msg.from?.username || "";
     await ensureUser(user_id, username);
     const rows: TelegramBot.InlineKeyboardButton[][] = [
-      [{ text: "🛍️ Каталог", callback_data: "menu_catalog" }],
-      [{ text: "🛒 Корзина", callback_data: encodeCb("cart_open") }],
-      [{ text: "❓ Как заказать?", callback_data: "menu_howto" }],
-      [{ text: "👥 Группа в Telegram", url: env.GROUP_URL || "https://t.me/+OiFfOVteCMFhYjZi" }],
-      [{ text: "⭐ Отзывы", url: env.REVIEWS_URL || "https://t.me/" }]
+      [{ text: "🎯 Выбрать вкусы", callback_data: "catalog" }],
+      [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
+      [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
+      [{ text: "👥 Группа в Telegram", url: shopConfig.telegramGroupUrl }],
+      [{ text: "⭐ Отзывы", url: shopConfig.reviewsUrl }]
     ];
     const admins = (env.TELEGRAM_ADMIN_IDS || "").split(",").map((s) => Number(s.trim())).filter((x) => x);
     if (admins.includes(user_id)) rows.push([{ text: "Админ", callback_data: "admin_open" }]);
@@ -77,7 +81,7 @@ export function registerClientFlow(bot: TelegramBot) {
     if (prev) { try { await bot.deleteMessage(msg.chat.id, prev); } catch {} }
     const sent = await bot.sendMessage(
       msg.chat.id,
-      "🍬 <b>Добро пожаловать</b>\n\n� Премиальные жидкости с быстрой и удобной выдачей\nELFIC / CHASER — оригинальная продукция, стабильное качество и вкусы, которые выбирают снова\n\n💶 Понятные цены без сюрпризов:\n• 1 шт — 18 €\n• 2 шт — 32 €\n• 3 шт — 45 €\n\n🚚 Курьерская выдача — выбираете удобный слот\n⭐ Реальные отзывы и постоянные клиенты\n\n👇 Выберите действие ниже и соберите заказ за минуту",
+      shopConfig.welcomeMessage,
       { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" }
     );
     lastMainMsg.set(user_id, sent.message_id);
@@ -96,41 +100,41 @@ export function registerClientFlow(bot: TelegramBot) {
     const chatId = q.message?.chat.id || 0;
     const messageId = q.message?.message_id as number;
     const user_id = q.from.id;
-    if (data === "back:main") {
+    if (data === "back:main" || data === "start") {
       const rows = [
-        [{ text: "🛍️ Каталог", callback_data: "menu_catalog" }],
-        [{ text: "🛒 Корзина", callback_data: encodeCb("cart_open") }],
-        [{ text: "❓ Как заказать?", callback_data: "menu_howto" }],
-        [{ text: "👥 Группа в Telegram", url: env.GROUP_URL || "https://t.me/+OiFfOVteCMFhYjZi" }],
-        [{ text: "⭐ Отзывы", url: env.REVIEWS_URL || "https://t.me/" }]
+        [{ text: "🎯 Выбрать вкусы", callback_data: "catalog" }],
+        [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
+        [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
+        [{ text: "👥 Группа в Telegram", url: shopConfig.telegramGroupUrl }],
+        [{ text: "⭐ Отзывы", url: shopConfig.reviewsUrl }]
       ];
       try {
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "Добро пожаловать! ✨\n\n🔥 Премиальные вкусы и быстрая выдача — соберите корзину за минуту.\n\n💨 Ассортимент: ELFIC / CHASER\n\n💶 Цены на жидкости:\n• 1 шт — 18 €\n• 2 шт — 32 €\n• 3 шт — 45 €\n\n🚚 Удобный слот у курьера\n⭐ Проверенное качество и отзывы\n\n👇 Выберите действие ниже и начните сейчас", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, shopConfig.welcomeMessage, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } catch {
-        await bot.sendMessage(chatId, "Добро пожаловать! ✨\n\n🔥 Премиальные вкусы и быстрая выдача — соберите корзину за минуту.\n\n💨 Ассортимент: ELFIC / CHASER\n\n💶 Цены на жидкости:\n• 1 шт — 18 €\n• 2 шт — 32 €\n• 3 шт — 45 €\n\n🚚 Удобный слот у курьера\n⭐ Проверенное качество и отзывы\n\n👇 Выберите действие ниже и начните сейчас", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+        await bot.sendMessage(chatId, shopConfig.welcomeMessage, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
-    if (data === "menu_catalog") {
+    if (data === "menu_catalog" || data === "catalog") {
       const rows = [
         [{ text: "💧 Жидкости", callback_data: encodeCb("catalog_liquids") }],
-        [{ text: "💨 Электроника", callback_data: encodeCb("catalog_electronics") }],
-        [{ text: "🛒 Корзина", callback_data: encodeCb("cart_open") }],
+        [{ text: "⚡️ Электроника", callback_data: encodeCb("catalog_electronics") }],
+        [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
         [{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]
       ];
       try {
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "🎯 <b>Каталог вкусов</b>\n\nВыберите бренд и вкус — добавление в корзину в один клик.\nНичего лишнего, всё быстро и понятно.\n\n💶 Цена считается автоматически по количеству:\n1 → 18 €\n2 → 32 €\n3 → 45 €\n\n🔥 Чем больше берёте — тем выгоднее\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "🎯 <b>Шаг 1: Выбери категорию</b>\n\nУ нас есть:\n• 💧 Жидкости — премиальные вкусы от европейских брендов\n• ⚡️ Электроника — одноразовые устройства\n\n👇 Что тебя интересует?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } catch {
-        await bot.sendMessage(chatId, "<b>📦 Каталог</b>\n\nКаталог вкусов\n\nВыберите бренд и вкус — добавляйте в корзину в один клик.\n\n💶 Цена считается автоматически по количеству:\n<b>1 → 18 € • 2 → 32 € • 3 → 45 €</b>\n\n🔥 Чем больше — тем выгоднее\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+        await bot.sendMessage(chatId, "🎯 <b>Шаг 1: Выбери категорию</b>\n\nУ нас есть:\n• 💧 Жидкости — премиальные вкусы от европейских брендов\n• ⚡️ Электроника — одноразовые устройства\n\n👇 Что тебя интересует?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
-    if (data === "menu_howto") {
-      const rows = [[{ text: "⬅️ Назад", callback_data: "back:main" }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
+    if (data === "menu_howto" || data === "how_to_order") {
+      const rows = [[{ text: "🎯 Начать выбор", callback_data: "catalog" }], [{ text: "🔙 Назад", callback_data: "start" }]];
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "<b>❓ Как заказать</b>\n\n1️⃣ Нажмите «Каталог»\n2️⃣ Выберите вкус и добавьте в корзину\n3️⃣ Перейдите в «Корзину»\n4️⃣ Подтвердите заказ\n5️⃣ Согласуйте удобный слот с курьером\n\n⏱ Весь процесс занимает 1–2 минуты\n\nЕсли возникнут вопросы — мы всегда на связи 👌", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "📖 <b>Как сделать заказ</b>\n\n1️⃣ Выбери вкусы\nНажми «🎯 Выбрать вкусы» и добавь понравившиеся жидкости в корзину\n\n2️⃣ Оформи заказ\nКогда выберешь всё что нужно, нажми «✅ Оформить заказ»\n\n3️⃣ Выбери курьера и время\nУкажи когда тебе удобно получить заказ\n\n4️⃣ Выбери оплату\nНаличные или картой — как удобно\n\n5️⃣ Получи заказ\nКурьер приедет в назначенное время. Попроси у него локацию точки выдачи\n\n⏱ Весь процесс займёт 1–2 минуты!\n\n👇 Готов заказать?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "catalog_liquids") {
@@ -158,7 +162,7 @@ export function registerClientFlow(bot: TelegramBot) {
         const rows: { text: string; callback_data: string }[][] = brands.map((b) => [{ text: `💧 ${b}`, callback_data: encodeCb(`liq_brand:${b}`) }]);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "🧪 <b>Выбор бренда</b>\n\n💶 Цена считается автоматически:\n1 — 18 € • 2 — 32 € • 3 — 45 €\n\n🔥 Чем больше — тем выгоднее\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\nУ нас два премиальных бренда:\n\n🧪 ELFIQ\nНасыщенные вкусы, плотный пар\n\n🧪 CHASER\nОсвежающие миксы, мягкий вкус\n\n💰 Помни:\n• 1 шт — 18 €\n• 2 шт — 32 € (экономия 4 €)\n• 3 шт — 45 € (экономия 9 €)\n\n👇 Какой бренд смотрим?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
@@ -169,7 +173,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const liquids = products.filter((p) => p.active && p.category === "liquids");
       const start = page * per;
       const slice = liquids.slice(start, start + per);
-      const rows: { text: string; callback_data: string }[][] = slice.map((a) => [{ text: `💧 ${a.title} · ${fmtMoney(a.price)}`, callback_data: encodeCb(`add_item:${a.product_id}`) }]);
+      const rows: { text: string; callback_data: string }[][] = slice.map((a) => [{ text: `💧 ${a.title}${a.qty_available>0&&a.qty_available<=3?` (только ${a.qty_available}❗️)`:''} · ${fmtMoney(a.price)}`, callback_data: encodeCb(`add_item:${a.product_id}`) }]);
       const nav: { text: string; callback_data: string }[] = [];
       if (page > 0) nav.push({ text: "◀️", callback_data: encodeCb(`catalog_liquids:page:${page - 1}`) });
       if (start + per < liquids.length) nav.push({ text: "▶️", callback_data: encodeCb(`catalog_liquids:page:${page + 1}`) });
@@ -212,7 +216,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const list = products.filter((p) => p.active && p.category === "electronics");
       const start = page * per;
       const slice = list.slice(start, start + per);
-      const rows: { text: string; callback_data: string }[][] = slice.map((a) => [{ text: `💨 ${a.title} · ${fmtMoney(a.price)}`, callback_data: encodeCb(`add_item:${a.product_id}`) }]);
+      const rows: { text: string; callback_data: string }[][] = slice.map((a) => [{ text: `💨 ${a.title}${a.qty_available>0&&a.qty_available<=3?` (только ${a.qty_available}❗️)`:''} · ${fmtMoney(a.price)}`, callback_data: encodeCb(`add_item:${a.product_id}`) }]);
       const nav: { text: string; callback_data: string }[] = [];
       if (page > 0) nav.push({ text: "◀️", callback_data: encodeCb(`catalog_electronics:page:${page - 1}`) });
       if (start + per < list.length) nav.push({ text: "▶️", callback_data: encodeCb(`catalog_electronics:page:${page + 1}`) });
@@ -231,7 +235,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const list = products.filter((p) => p.active && p.category === "electronics" && (p.brand || "") === brand);
       const start = page * per;
       const slice = list.slice(start, start + per);
-      const rows: { text: string; callback_data: string }[][] = slice.map((a) => [{ text: `💨 ${a.title} · ${fmtMoney(a.price)}`, callback_data: encodeCb(`add_item:${a.product_id}`) }]);
+      const rows: { text: string; callback_data: string }[][] = slice.map((a) => [{ text: `💨 ${a.title}${a.qty_available>0&&a.qty_available<=3?` (только ${a.qty_available}❗️)`:''} · ${fmtMoney(a.price)}`, callback_data: encodeCb(`add_item:${a.product_id}`) }]);
       const nav: { text: string; callback_data: string }[] = [];
       if (page > 0) nav.push({ text: "◀️", callback_data: encodeCb(`elec_brand:${brand}:page:${page - 1}`) });
       if (start + per < list.length) nav.push({ text: "▶️", callback_data: encodeCb(`elec_brand:${brand}:page:${page + 1}`) });
@@ -251,7 +255,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const list = products.filter((p) => p.active && p.category === "liquids" && (p.brand || "") === brand);
       const start = page * per;
       const slice = list.slice(start, start + per);
-      const rows: { text: string; callback_data: string }[][] = slice.map((a) => [{ text: `💧 ${a.title} · ${fmtMoney(a.price)}`, callback_data: encodeCb(`add_item:${a.product_id}`) }]);
+      const rows: { text: string; callback_data: string }[][] = slice.map((a) => [{ text: `💧 ${a.title}${a.qty_available>0&&a.qty_available<=3?` (только ${a.qty_available}❗️)`:''} · ${fmtMoney(a.price)}`, callback_data: encodeCb(`add_item:${a.product_id}`) }]);
       const nav: { text: string; callback_data: string }[] = [];
       if (page > 0) nav.push({ text: "◀️", callback_data: encodeCb(`liq_brand:${brand}:page:${page - 1}`) });
       if (start + per < list.length) nav.push({ text: "▶️", callback_data: encodeCb(`liq_brand:${brand}:page:${page + 1}`) });
@@ -259,7 +263,7 @@ export function registerClientFlow(bot: TelegramBot) {
       rows.push([{ text: "🛒 Корзина", callback_data: encodeCb("cart_open") }]);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, `<b>${brand}</b> 💧\n\n💶 Цены: <b>1 → 18€ · 2 → 32€ · 3 → 45€</b>\n\n👇 Нажмите на товар, чтобы добавить в корзину`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `🧪 <b>${brand}</b>\n\nШаг 3: Выбери вкус\n\nПросто нажми на понравившийся вкус, и он добавится в твою корзину 🛒\n\n� Подсказка: Не переживай если сразу не решишь — потом мы покажем тебе другие интересные вкусы!\n\n👇 Какой вкус попробуешь?`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "back:menu_catalog") {
@@ -320,9 +324,8 @@ export function registerClientFlow(bot: TelegramBot) {
         }
       }
       if (p.category === "liquids") {
-        try {
-          await showGamifiedUpsellInline(bot, chatId, messageId, user_id, "liquids", new Set((items||[]).map(i=>i.product_id)));
-        } catch {}
+        const exclude = Array.from(new Set((items || []).map((i) => i.product_id)));
+        try { await showHybridUpsellWithGuidance(bot, chatId, messageId, user_id, "liquids", exclude); } catch {}
       }
     } else if (data === "show_upsell") {
       const products = await refreshProductsCache();
@@ -333,7 +336,7 @@ export function registerClientFlow(bot: TelegramBot) {
         if (p && typeof p.upsell_group_id === "number") groups.add(p.upsell_group_id);
       }
       const sug = products.filter((p) => p.active && p.upsell_group_id != null && groups.has(p.upsell_group_id as number)).slice(0, 6);
-      const rows: { text: string; callback_data: string }[][] = sug.slice(0, 3).map((p) => [{ text: `🔥 Добавить вкус: ${p.title} · ${p.category === "liquids" ? "16.00 €" : fmtMoney(p.price)}`, callback_data: `add_upsell:${p.product_id}` }]);
+      const rows: { text: string; callback_data: string }[][] = sug.slice(0, 3).map((p) => [{ text: `🔥 Добавить вкус: ${p.title}${p.qty_available>0&&p.qty_available<=3?` (только ${p.qty_available}❗️)`:''} · ${p.category === "liquids" ? "16.00 €" : fmtMoney(p.price)}`, callback_data: `add_upsell:${p.product_id}` }]);
       rows.push([{ text: "🧴 Добавить ещё жидкости", callback_data: encodeCb("catalog_liquids") }]);
       await bot.editMessageText("<b>Рекомендуем дополнительно</b> ⭐", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     } else if (data.startsWith("add_upsell:")) {
@@ -411,8 +414,18 @@ export function registerClientFlow(bot: TelegramBot) {
     } catch {
       await bot.sendMessage(chatId, `<b>Добавлено в апсел</b>: ${p.title} — скидка 10%\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings3 > 0 ? ` · Экономия: ${savings3.toFixed(2)} €` : ""}`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     }
-    } else if (data === "cart_open") {
+    } else if (data === "cart_open" || data === "view_cart") {
       await showCart(bot, chatId, user_id, messageId);
+    } else if (data.startsWith("add_to_cart:")) {
+      const pid = Number(data.split(":")[1]);
+      const products = await getProducts();
+      const p = products.find((x) => x.product_id === pid);
+      if (!p) return;
+      addToCart(user_id, p, false);
+      upsellRerolls.set(user_id, 0);
+      const items = carts.get(user_id) || [];
+      const exclude = Array.from(new Set((items || []).map((i) => i.product_id)));
+      try { await showHybridUpsellWithGuidance(bot, chatId, messageId, user_id, p.category, exclude.concat([p.product_id])); } catch {}
     } else if (data.startsWith("cart_add:")) {
       const parts = data.split(":");
       const pid = Number(parts[1]);
@@ -442,15 +455,32 @@ export function registerClientFlow(bot: TelegramBot) {
       carts.set(user_id, items);
       await recalcLiquidPrices(user_id);
       await showCart(bot, chatId, user_id, messageId);
-    } else if (data === "confirm_order") {
+    } else if (data === "confirm_order" || data === "confirm_order_start") {
       const items = carts.get(user_id) || [];
       if (items.length === 0) return;
-      const order = await createOrder(user_id, items);
+      const productsNow = await getProducts();
+      for (const it of items) {
+        const p = productsNow.find((x) => x.product_id === it.product_id);
+        if (!p || !p.active || p.qty_available < it.qty) {
+          const warnKb: TelegramBot.InlineKeyboardButton[][] = [[{ text: "🛒 Перейти в корзину", callback_data: encodeCb("view_cart") }]];
+          await bot.editMessageText(`❌ Недостаточно "${p ? p.title : ('#'+it.product_id)}". Доступно: ${p ? p.qty_available : 0} шт.\n\nПожалуйста, обновите корзину.`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: warnKb }, parse_mode: "HTML" });
+          return;
+        }
+      }
+      let order;
+      try {
+        order = await createOrder(user_id, items);
+      } catch (e:any) {
+        const msgErr = String(e?.message || "");
+        const warnKb: TelegramBot.InlineKeyboardButton[][] = [[{ text: "🛒 Перейти в корзину", callback_data: encodeCb("view_cart") }]];
+        await bot.editMessageText(`❌ Ошибка при оформлении заказа.\n${msgErr.includes("Insufficient stock") ? "Недостаточно товара. Пожалуйста, обновите корзину." : "Попробуйте снова."}`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: warnKb }, parse_mode: "HTML" });
+        return;
+      }
       await confirmOrder(order.order_id);
       const couriers = await getActiveCouriers();
       const rows: TelegramBot.InlineKeyboardButton[][] = couriers.map((c) => [{ text: `${c.name} · ${c.last_delivery_interval}`, callback_data: encodeCb(`choose_courier:${order.order_id}|${c.tg_id}`) }]);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
-      await bot.editMessageText(`<b>Выберите курьера</b> 🚚`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.editMessageText(`🎉 Отлично! Оформляем заказ\n\n📦 Что ты заказываешь:\n${renderCart(items, await getProducts())}\n\n💰 Сумма: ${(await previewTotals(user_id, items)).total_with_discount.toFixed(2)} €\n\n━━━━━━━━━━━━━━━━\n\nШаг 1 из 4: Выбери курьера\n\nВсе наши курьеры проверены и работают быстро �\n\n👇 Какой курьер тебе удобнее?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     } else if (data.startsWith("choose_courier:")) {
       const payload = data.substring("choose_courier:".length);
       const [orderIdStr, courierIdStr] = payload.split("|");
@@ -458,6 +488,11 @@ export function registerClientFlow(bot: TelegramBot) {
       const courier_tg_id = Number(courierIdStr);
       await setOrderCourier(order_id, courier_tg_id);
       await setCourierAssigned(order_id, courier_tg_id);
+      const st0 = userStates.get(user_id) || { state: "selecting_date", data: {}, lastActivity: Date.now() };
+      st0.data = { ...(st0.data || {}), courier_id: courier_tg_id };
+      st0.state = "selecting_date";
+      st0.lastActivity = Date.now();
+      userStates.set(user_id, st0);
       const today = formatDate(new Date());
       const tomorrow = formatDate(addDays(new Date(), 1));
       const dayAfter = formatDate(addDays(new Date(), 2));
@@ -468,7 +503,7 @@ export function registerClientFlow(bot: TelegramBot) {
         [{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }],
         [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]
       ];
-      await bot.editMessageText(`<b>Выберите день</b> 📅`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rowsDates }, parse_mode: "HTML" });
+      await bot.editMessageText(`✅ Курьер выбран\n\n━━━━━━━━━━━━━━━━\n\nШаг 2 из 4: Выбери день доставки\n\nКогда тебе удобно получить заказ? 📅\n\n💡 Подсказка: Доставка занимает 1–2 минуты с момента встречи с курьером\n\n👇 Какой день выбираешь?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rowsDates }, parse_mode: "HTML" });
     } else if (data.startsWith("back:choose_courier:")) {
       const order_id = Number(data.split(":")[2]);
       const couriers = await getActiveCouriers();
@@ -484,6 +519,11 @@ export function registerClientFlow(bot: TelegramBot) {
       const interval = chosen?.last_delivery_interval || "14-16";
       const slots = generateTimeSlots(interval);
       const occupied = chosen ? getOccupiedSlots(chosen.tg_id, dateStr) : new Set<string>();
+      const st1 = userStates.get(user_id) || { state: "selecting_slot", data: {}, lastActivity: Date.now() };
+      st1.data = { ...(st1.data || {}), delivery_date: dateStr };
+      st1.state = "selecting_slot";
+      st1.lastActivity = Date.now();
+      userStates.set(user_id, st1);
       const keyboard: TelegramBot.InlineKeyboardButton[][] = [];
       for (let i = 0; i < Math.min(slots.length, 21); i += 3) {
         const row: TelegramBot.InlineKeyboardButton[] = [];
@@ -494,7 +534,7 @@ export function registerClientFlow(bot: TelegramBot) {
         keyboard.push(row);
       }
       const backRow: TelegramBot.InlineKeyboardButton[][] = [[{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
-      await bot.editMessageText(`<b>Доставка</b>\nДень: ${dateStr}\nИнтервал: ${interval}\nВыберите точное время:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard.concat(backRow) }, parse_mode: "HTML" });
+      await bot.editMessageText(`✅ День выбран: ${dateStr}\n\n━━━━━━━━━━━━━━━━\n\nШаг 3 из 4: Выбери точное время\n\nВо сколько тебе удобно встретиться с курьером? ⏰\n\n💡 Подсказка: Выбирай время с запасом — курьер приедет к точке выдачи в это время\n\n👇 Выбери удобный интервал:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard.concat(backRow) }, parse_mode: "HTML" });
     } else if (data.startsWith("select_slot:")) {
       const payload = data.substring("select_slot:".length);
       const [orderIdStr, time, dateStr] = payload.split("|");
@@ -526,11 +566,16 @@ export function registerClientFlow(bot: TelegramBot) {
         return;
       }
       await setDeliverySlot(order_id, interval, time, dateStr);
+      const st2 = userStates.get(user_id) || { state: "selecting_payment", data: {}, lastActivity: Date.now() };
+      st2.data = { ...(st2.data || {}), delivery_time: time };
+      st2.state = "selecting_payment";
+      st2.lastActivity = Date.now();
+      userStates.set(user_id, st2);
       const payKb: TelegramBot.InlineKeyboardButton[][] = [
         [{ text: "💳 Оплата картой", callback_data: encodeCb(`pay:${order_id}|card`) }],
         [{ text: "💵 Наличные", callback_data: encodeCb(`pay:${order_id}|cash`) }]
       ];
-      await bot.editMessageText(`✅ <b>Время доставки</b>: ${time}\nДень: ${dateStr}\nИнтервал: ${interval}\nВыберите способ оплаты:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
+      await bot.editMessageText(`✅ Время выбрано: ${time}\n\n━━━━━━━━━━━━━━━━\n\nШаг 4 из 4: Выбери способ оплаты\n\nКак тебе удобно оплатить заказ? 💳\n\n💡 Подсказка:\n• Наличные — отдашь деньги курьеру при встрече\n• Карта — оплатишь через терминал у курьера\n\n👇 Как будешь платить?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
       const order = await getOrderById(order_id);
       const products = await getProducts();
       const lines = (order?.items || []).map((i) => {
@@ -560,26 +605,57 @@ export function registerClientFlow(bot: TelegramBot) {
     } else if (data.startsWith("pay:")) {
       const [orderIdStr, method] = data.substring(4).split("|");
       const order_id = Number(orderIdStr);
+      const st = userStates.get(user_id);
+      if (!st || !st.data || !st.data.courier_id || !st.data.delivery_date || !st.data.delivery_time) {
+        await bot.editMessageText("❌ Упс! Произошла ошибка. Попробуйте оформить заказ заново через /start", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: "🏠 На главную", callback_data: "start" }]] }, parse_mode: "HTML" });
+        return;
+      }
       await setPaymentMethod(order_id, method === "card" ? "card" : "cash");
+      try {
+        const backend = (await import("../../infra/backend")).getBackend();
+        await backend.updateOrderDetails?.(order_id, {
+          courier_id: st.data.courier_id,
+          slot_time: st.data.delivery_time,
+          delivery_date: st.data.delivery_date,
+          payment_method: method
+        } as any);
+      } catch {}
       carts.delete(user_id);
+      const orderNow = await getOrderById(order_id);
+      const productsAll = await getProducts();
+      const itemsList = (orderNow?.items || []).map((i) => {
+        const p = productsAll.find((x) => x.product_id === i.product_id);
+        const name = p ? p.title : `#${i.product_id}`;
+        return `• ${name} × ${i.qty}`;
+      }).join("\n");
+      const couriersAll = await getActiveCouriers();
+      const courier = couriersAll.find((c) => c.tg_id === (orderNow?.courier_id || -1));
+      const paymentText = method === "card" ? "карта" : "наличные";
+      const message = `✅ <b>Заказ #${order_id} оформлен!</b>\n\n📦 <b>Твой заказ:</b>\n${itemsList}\n\n💰 <b>Сумма: ${(orderNow?.total_with_discount || 0).toFixed(2)} €</b>\n💳 <b>Оплата: ${paymentText}</b>\n⏰ <b>Время: ${st.data.delivery_time}</b>\n📅 <b>День: ${st.data.delivery_date}</b>\n\n━━━━━━━━━━━━━━━━\n\n👤 <b>Твой курьер:</b> ${courier?.name || "Курьер"}\n\n<b>Что делать дальше:</b>\n1️⃣ Напиши курьеру (кнопка ниже)\n2️⃣ Скажи что сделал заказ #${order_id}\n3️⃣ Попроси локацию точки выдачи\n4️⃣ Приходи в назначенное время\n\nСпасибо за заказ! 🔥`;
       const closeKb: TelegramBot.InlineKeyboardButton[][] = [[{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
-      await bot.editMessageText("✅ <b>Оплата выбрана</b>. Заказ оформлен.", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: closeKb }, parse_mode: "HTML" });
+      await bot.editMessageText(message, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: closeKb }, parse_mode: "HTML" });
       const order3 = await getOrderById(order_id);
       const notifyTgId2 = order3?.courier_id || null;
       const contactKeyboard: TelegramBot.InlineKeyboardButton[][] = [];
       if (notifyTgId2) contactKeyboard.push([{ text: "✉️ Написать курьеру", url: `tg://user?id=${notifyTgId2}` }]);
-      contactKeyboard.push([{ text: "✉️ Связь @elfovadim", url: "https://t.me/elfovadim" }]);
       contactKeyboard.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
       try {
         await bot.sendMessage(chatId, `📍 Попросите у курьера локацию точки выдачи.`, { reply_markup: { inline_keyboard: contactKeyboard }, parse_mode: "HTML" });
       } catch {
-        await bot.sendMessage(chatId, `📍 Попросите у курьера локацию точки выдачи.`, { reply_markup: { inline_keyboard: [[{ text: "✉️ Связь @elfovadim", url: "https://t.me/elfovadim" }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]] }, parse_mode: "HTML" });
+        await bot.sendMessage(chatId, `📍 Попросите у курьера локацию точки выдачи.`, { reply_markup: { inline_keyboard: [[{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]] }, parse_mode: "HTML" });
       }
+      try { userStates.delete(user_id); userRerollCount.delete(user_id); } catch {}
     } else if (data.startsWith("gam_upsell_add:")) {
       const pid = Number(data.split(":")[1]);
       const products = await getProducts();
       const p = products.find((x) => x.product_id === pid);
       if (!p) return;
+      const itemsBefore = carts.get(user_id) || [];
+      const currentQty = (itemsBefore.find((x) => x.product_id === pid)?.qty || 0);
+      if (!p.active || p.qty_available <= currentQty) {
+        await bot.answerCallbackQuery({ callback_query_id: q.id, text: "❌ Товар закончился" }).catch(()=>{});
+        return;
+      }
       const price = p.category === "liquids" ? (await currentUnitPrice(user_id, products)) : p.price;
       addToCart(user_id, p, true, price);
       try {
@@ -598,23 +674,68 @@ export function registerClientFlow(bot: TelegramBot) {
       if (p.category === "liquids" && totalUpsells < 5) {
         try { await showGamifiedUpsellInline(bot, chatId, messageId, user_id, "liquids", exclude); } catch {}
       }
-    } else if (data.startsWith("gam_upsell_reroll:")) {
-      const category = data.split(":")[1];
+    } else if (data.startsWith("gam_upsell_reroll:") || data.startsWith("fortune_reroll:")) {
+      const category = data.split(":")[1] as "liquids" | "electronics";
       const cur = upsellRerolls.get(user_id) || 0;
       upsellRerolls.set(user_id, cur + 1);
       try { getDb().prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, 0, "reroll", Date.now()); } catch {}
-      const items = carts.get(user_id) || [];
-      const exclude = new Set(items.map(i=>i.product_id));
-      const shownSet = upsellShown.get(user_id) || new Set<number>();
-      for (const s of shownSet) exclude.add(s);
       const products2 = await getProducts();
-      const totals2 = await previewTotals(user_id, items);
-      const savings2 = computeSavings(items, products2);
-      const spin = `✅ Товар добавлен!\n\n${renderCart(items, products2)}\n\n💰 Итог: ${totals2.total_with_discount.toFixed(2)} €${savings2>0?`\n💚 Экономия: ${savings2.toFixed(2)} €`:''}\n\n━━━━━━━━━━━━━━━━\n🎲 Крутим барабан...`;
+      const items2 = carts.get(user_id) || [];
+      const totals2 = await previewTotals(user_id, items2);
+      const savings2 = computeSavings(items2, products2);
+      const spin = `✅ Корзина:\n${renderCart(items2, products2)}\n\n💰 Итог: ${totals2.total_with_discount.toFixed(2)} €${savings2>0?`\n💚 Экономия: ${savings2.toFixed(2)} €`:''}\n\n━━━━━━━━━━━━━━━━\n� Крутим фортуну...\n\n⏳ Подбираем новые вкусы для тебя...`;
       try { await bot.editMessageText(spin, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }); } catch {}
       setTimeout(async () => {
-        await showGamifiedUpsellInline(bot, chatId, messageId, user_id, category, exclude);
-      }, 500);
+        const st = userStates.get(user_id);
+        const prevEx = Array.isArray(st?.data?.excludeSkus) ? st.data.excludeSkus : [];
+        const prevShown = Array.isArray(st?.data?.shown) ? st.data.shown : [];
+        const allEx = Array.from(new Set<number>([...prevEx, ...prevShown]));
+        await showHybridUpsellWithGuidance(bot, chatId, messageId, user_id, category, allEx);
+      }, 800);
+    } else if (data.startsWith("fortune_add:")) {
+      const pid = Number(data.split(":")[1]);
+      const products = await getProducts();
+      const p = products.find((x) => x.product_id === pid);
+      if (!p) return;
+      const items3 = carts.get(user_id) || [];
+      const currentQty3 = (items3.find((x) => x.product_id === pid)?.qty || 0);
+      if (!p.active || p.qty_available <= currentQty3) {
+        await bot.answerCallbackQuery({ callback_query_id: q.id, text: "❌ Товар закончился" }).catch(()=>{});
+        return;
+      }
+      const itemsFortune = carts.get(user_id) || [];
+      let liquCount3 = 0; for (const it of itemsFortune) { const ip = products.find((x) => x.product_id === it.product_id); if (ip && ip.category === "liquids") liquCount3 += it.qty; }
+      const price3 = p.category === "liquids" ? (liquCount3 >= 2 ? 15 : 16) : p.price;
+      addToCart(user_id, p, true, price3);
+      try { getDb().prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, pid, "accepted", Date.now()); } catch {}
+      upsellRerolls.set(user_id, 0);
+      const st3 = userStates.get(user_id);
+      const prevEx3 = Array.isArray(st3?.data?.excludeSkus) ? st3.data.excludeSkus : [];
+      await showHybridUpsellWithGuidance(bot, chatId, messageId, user_id, p.category, Array.from(new Set<number>([...prevEx3, pid])));
+    } else if (data.startsWith("catalog_add:")) {
+      const pid = Number(data.split(":")[1]);
+      const products = await getProducts();
+      const p = products.find((x) => x.product_id === pid);
+      if (!p) return;
+      const items4 = carts.get(user_id) || [];
+      const currentQty4 = (items4.find((x) => x.product_id === pid)?.qty || 0);
+      if (!p.active || p.qty_available <= currentQty4) {
+        await bot.answerCallbackQuery({ callback_query_id: q.id, text: "❌ Товар закончился" }).catch(()=>{});
+        return;
+      }
+      const itemsCatAdd = carts.get(user_id) || [];
+      let liquCount4 = 0; for (const it of itemsCatAdd) { const ip = products.find((x) => x.product_id === it.product_id); if (ip && ip.category === "liquids") liquCount4 += it.qty; }
+      const price4 = p.category === "liquids" ? (liquCount4 >= 2 ? 15 : 16) : p.price;
+      addToCart(user_id, p, true, price4);
+      try { getDb().prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, pid, "accepted", Date.now()); } catch {}
+      upsellRerolls.set(user_id, 0);
+      const st4 = userStates.get(user_id);
+      const prevEx4 = Array.isArray(st4?.data?.excludeSkus) ? st4.data.excludeSkus : [];
+      await showHybridUpsellWithGuidance(bot, chatId, messageId, user_id, p.category, Array.from(new Set<number>([...prevEx4, pid])));
+    } else if (data.startsWith("upsell_catalog:")) {
+      const [, category, priceStr] = data.split(":");
+      const price = Number(priceStr);
+      await showUpsellCatalog(bot, chatId, messageId, user_id, category as "liquids" | "electronics", price);
     }
   });
 }
@@ -663,9 +784,9 @@ async function showCart(bot: TelegramBot, chatId: number, user_id: number, messa
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
     const pick = pool.slice(0, 2);
     const unitNext = liquCount >= 2 ? "15.00 €" : "16.00 €";
-    kb.unshift(pick.map((p) => ({ text: `🔥 ${p.title} — ${unitNext}`, callback_data: encodeCb(`add_upsell:${p.product_id}`) })));
+    kb.unshift(pick.map((p) => ({ text: `🔥 ${p.title}${p.qty_available>0&&p.qty_available<=3?` (только ${p.qty_available}❗️)`:''} — ${unitNext}`, callback_data: encodeCb(`add_upsell:${p.product_id}`) })));
   } catch {}
-  kb.push([{ text: `✅ Подтвердить · ${totals.total_with_discount.toFixed(2)} €`, callback_data: encodeCb("confirm_order") }]);
+  kb.push([{ text: `✅ Оформить заказ · ${totals.total_with_discount.toFixed(2)} €`, callback_data: encodeCb("confirm_order_start") }]);
   kb.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
   const text = `<b>Корзина</b> 🛒\n${lines}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\nЭкономия: <b>${savings.toFixed(2)} €</b>` : ""}\n\n💶 Цены: <b>1 → 18€ · 2 → 32€ · 3 → 45€</b>${offer ? `\n${offer}` : ""}`;
   if (typeof messageId === "number") await bot.editMessageText(text, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: kb }, parse_mode: "HTML" });
