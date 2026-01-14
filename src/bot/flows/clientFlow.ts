@@ -62,6 +62,14 @@ async function recalcLiquidPrices(user_id: number) {
     if (p && p.category === "liquids") it.price = unit;
   }
   carts.set(user_id, cart);
+  const total = cart.reduce((s,i)=>s+(i.price*i.qty),0);
+  try {
+    console.log("Cart calculation:");
+    console.log("City:", shopConfig.cityCode);
+    console.log("Qty:", liquCount);
+    console.log("Price per unit:", unit);
+    console.log("Total:", Math.round(total*100)/100);
+  } catch {}
 }
 
 export function registerClientFlow(bot: TelegramBot) {
@@ -158,12 +166,12 @@ export function registerClientFlow(bot: TelegramBot) {
         if (nav.length) rows.push(nav);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "📦 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 Цены: <b>1 → 18€ · 2 → 32€ · 3 → 45€</b>\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "📦 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 Цены автоматически зависят от количества и города.\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } else {
         const rows: { text: string; callback_data: string }[][] = brands.map((b) => [{ text: `💧 ${b}`, callback_data: encodeCb(`liq_brand:${b}`) }]);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\nУ нас два премиальных бренда:\n\n🧪 ELFIQ\nНасыщенные вкусы, плотный пар\n\n🧪 CHASER\nОсвежающие миксы, мягкий вкус\n\n💰 Помни:\n• 1 шт — 18 €\n• 2 шт — 32 € (экономия 4 €)\n• 3 шт — 45 € (экономия 9 €)\n\n👇 Какой бренд смотрим?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\n🧪 ELFIQ — насыщенные вкусы\n🧪 CHASER — освежающие миксы\n\n💰 Цена автоматически зависит от количества и города.\n\n👇 Какой бренд смотрим?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
@@ -181,7 +189,7 @@ export function registerClientFlow(bot: TelegramBot) {
       if (nav.length) rows.push(nav);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "🎯 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 Цена считается автоматически по количеству:\n1 → 18 €\n2 → 32 €\n3 → 45 €\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "🎯 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 Цена автоматически зависит от количества и города.\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "catalog_electronics") {
@@ -276,7 +284,7 @@ export function registerClientFlow(bot: TelegramBot) {
         [{ text: "⭐ Отзывы", url: env.REVIEWS_URL || "https://t.me/" }]
       ];
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "🍬 <b>Добро пожаловать</b>\n\n� Премиальные жидкости с быстрой и удобной выдачей\nELFIC / CHASER — оригинальная продукция, стабильное качество и вкусы, которые выбирают снова\n\n💶 Понятные цены без сюрпризов:\n• 1 шт — 18 €\n• 2 шт — 32 €\n• 3 шт — 45 €\n\n🚚 Курьерская выдача — выбираете удобный слот\n⭐ Реальные отзывы и постоянные клиенты\n\n👇 Выберите действие ниже и соберите заказ за минуту", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "🍬 <b>Добро пожаловать</b>\n\nПремиальные жидкости ELFIQ/CHASER и электроника.\n💶 Цена автоматически зависит от количества и города.\n🚚 Курьерская выдача — выбираете удобный слот.\n\n👇 Выберите действие и соберите заказ за минуту", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data.startsWith("add_item:")) {
@@ -306,8 +314,8 @@ export function registerClientFlow(bot: TelegramBot) {
           for (const s of pick) dbx.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, s.product_id, "offered", Date.now());
         } catch {}
         let liquCount = 0; for (const it of items) { const ip = products.find((x) => x.product_id === it.product_id); if (ip && ip.category === "liquids") liquCount += it.qty; }
-        const nextLabel = liquCount >= 2 ? "15.00 €" : "16.00 €";
-        const rows: { text: string; callback_data: string }[][] = pick.map((s) => [{ text: `➕ ${s.title} — ${nextLabel}`, callback_data: encodeCb(`add_upsell:${s.product_id}`) }]);
+        const nextUnitDyn = await getLiquidUnitPrice(liquCount + 1, shopConfig.cityCode);
+        const rows: { text: string; callback_data: string }[][] = pick.map((s) => [{ text: `➕ ${s.title} — ${nextUnitDyn.toFixed(2)} €`, callback_data: encodeCb(`add_upsell:${s.product_id}`) }]);
         rows.push([{ text: "🧪 Выбор бренда", callback_data: encodeCb("catalog_liquids") }]);
         finalKeyboard = rows.concat(finalKeyboard);
       }
@@ -345,7 +353,9 @@ export function registerClientFlow(bot: TelegramBot) {
         if (p && typeof p.upsell_group_id === "number") groups.add(p.upsell_group_id);
       }
       const sug = products.filter((p) => p.active && p.upsell_group_id != null && groups.has(p.upsell_group_id as number)).slice(0, 6);
-      const rows: { text: string; callback_data: string }[][] = sug.slice(0, 3).map((p) => [{ text: `🔥 Добавить вкус: ${p.title}${p.qty_available>0&&p.qty_available<=3?` (только ${p.qty_available}❗️)`:''} · ${p.category === "liquids" ? "16.00 €" : fmtMoney(p.price)}`, callback_data: `add_upsell:${p.product_id}` }]);
+      let liquCountS = 0; for (const it of cart) { const ip = products.find((x) => x.product_id === it.product_id); if (ip && ip.category === "liquids") liquCountS += it.qty; }
+      const nextUnitS = await getLiquidUnitPrice(liquCountS + 1, shopConfig.cityCode);
+      const rows: { text: string; callback_data: string }[][] = sug.slice(0, 3).map((p) => [{ text: `🔥 Добавить вкус: ${p.title}${p.qty_available>0&&p.qty_available<=3?` (только ${p.qty_available}❗️)`:''} · ${p.category === "liquids" ? `${nextUnitS.toFixed(2)} €` : fmtMoney(p.price)}`, callback_data: `add_upsell:${p.product_id}` }]);
       rows.push([{ text: "🧴 Добавить ещё жидкости", callback_data: encodeCb("catalog_liquids") }]);
       await bot.editMessageText("<b>Рекомендуем дополнительно</b> ⭐", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     } else if (data.startsWith("add_upsell:")) {
@@ -361,7 +371,8 @@ export function registerClientFlow(bot: TelegramBot) {
       dbx.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(user_id, pid, "accepted", Date.now());
     } catch {}
     const items = carts.get(user_id) || [];
-    const label = p.category === "liquids" ? "16.00 €" : fmtMoney(p.price);
+    const cu = await currentUnitPrice(user_id, products);
+    const label = p.category === "liquids" ? `${cu.toFixed(2)} €` : fmtMoney(p.price);
     const totals = await previewTotals(user_id, items);
     let savings2 = 0;
     for (const it of items) {
@@ -378,8 +389,8 @@ export function registerClientFlow(bot: TelegramBot) {
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
     const more = pool.slice(0, 2);
     let liquCount2 = 0; for (const it of items) { const ip = products.find((x) => x.product_id === it.product_id); if (ip && ip.category === "liquids") liquCount2 += it.qty; }
-    const nextLabel2 = liquCount2 >= 2 ? "15.00 €" : "16.00 €";
-    const rows: { text: string; callback_data: string }[][] = more.map((m) => [{ text: `➕ Добавить вкус — ${nextLabel2}`, callback_data: encodeCb(`add_upsell:${m.product_id}`) }]);
+    const nextUnit2 = await getLiquidUnitPrice(liquCount2 + 1, shopConfig.cityCode);
+    const rows: { text: string; callback_data: string }[][] = more.map((m) => [{ text: `➕ Добавить вкус — ${nextUnit2.toFixed(2)} €`, callback_data: encodeCb(`add_upsell:${m.product_id}`) }]);
     rows.push([{ text: `✅ Подтвердить заказ · ${totals.total_with_discount.toFixed(2)} €`, callback_data: encodeCb("confirm_order") }]);
     rows.push([{ text: "🧴 Добавить ещё жидкости", callback_data: encodeCb("catalog_liquids") }]);
     rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
@@ -673,7 +684,7 @@ export function registerClientFlow(bot: TelegramBot) {
       } catch {}
       const items = carts.get(user_id) || [];
       const totals = await previewTotals(user_id, items);
-      const savingsNow = computeSavings(items, products);
+      const savingsNow = await computeSavings(items, products);
       const msg = `✅ ${p.title} добавлен!\n\n💰 Итог: ${totals.total_with_discount.toFixed(2)} €${savingsNow>0?`\n💚 Экономия: ${savingsNow.toFixed(2)} €`:''}\n\n━━━━━━━━━━━━━━━━`;
       try { await bot.editMessageText(msg, { chat_id: chatId, message_id: messageId, parse_mode: "HTML" }); } catch {}
       // reset rerolls and show next upsell cycle (limit overall to 5)
@@ -691,8 +702,8 @@ export function registerClientFlow(bot: TelegramBot) {
       const products2 = await getProducts();
       const items2 = carts.get(user_id) || [];
       const totals2 = await previewTotals(user_id, items2);
-      const savings2 = computeSavings(items2, products2);
-      const spin = `✅ Корзина:\n${renderCart(items2, products2)}\n\n💰 Итог: ${totals2.total_with_discount.toFixed(2)} €${savings2>0?`\n💚 Экономия: ${savings2.toFixed(2)} €`:''}\n\n━━━━━━━━━━━━━━━━\n� Крутим фортуну...\n\n⏳ Подбираем новые вкусы для тебя...`;
+      const savings2 = await computeSavings(items2, products2);
+      const spin = `✅ Корзина:\n${renderCart(items2, products2)}\n\n💰 Итог: ${totals2.total_with_discount.toFixed(2)} €${savings2>0?`\n💚 Экономия: ${savings2.toFixed(2)} €`:''}\n\n━━━━━━━━━━━━━━━━\n🎰 Крутим фортуну...\n\n⏳ Подбираем новые вкусы для тебя...`;
       try { await bot.editMessageText(spin, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }); } catch {}
       setTimeout(async () => {
         const st = userStates.get(user_id);
@@ -768,10 +779,25 @@ async function showCart(bot: TelegramBot, chatId: number, user_id: number, messa
     const p = products.find((x) => x.product_id === it.product_id);
     if (p && p.category === "liquids") liquCount += it.qty;
   }
-  const offer = liquCount === 0 ? ""
-    : (liquCount === 1 ? "Добавьте ещё 1 для <b>32.00 €</b> (экономия 4 €)"
-    : (liquCount === 2 ? "Добавьте ещё 1 для <b>45.00 €</b> (экономия 9 €)"
-    : "Цена за жидкость: <b>15.00 €</b>"));
+  const offer = (async () => {
+    if (liquCount === 0) return "";
+    if (liquCount === 1) {
+      const unit2 = await getLiquidUnitPrice(2, shopConfig.cityCode);
+      const unit1 = await getLiquidUnitPrice(1, shopConfig.cityCode);
+      const total2 = unit2 * 2;
+      const save = Math.max(0, Math.round((unit1 * 2 - total2)));
+      return `Добавьте ещё 1 для <b>${total2.toFixed(2)} €</b> (экономия ${save} €)`;
+    }
+    if (liquCount === 2) {
+      const unit3 = await getLiquidUnitPrice(3, shopConfig.cityCode);
+      const unit1 = await getLiquidUnitPrice(1, shopConfig.cityCode);
+      const total3 = unit3 * 3;
+      const save = Math.max(0, Math.round((unit1 * 3 - total3)));
+      return `Добавьте ещё 1 для <b>${total3.toFixed(2)} €</b> (экономия ${save} €)`;
+    }
+    const unitN = await getLiquidUnitPrice(liquCount, shopConfig.cityCode);
+    return `Цена за жидкость: <b>${unitN.toFixed(2)} €</b>`;
+  })();
   const lines = items.map((i) => {
     const p = products.find((x) => x.product_id === i.product_id);
     const t = p ? p.title : `#${i.product_id}`;
@@ -792,12 +818,12 @@ async function showCart(bot: TelegramBot, chatId: number, user_id: number, messa
     const pool = products.filter((x) => x.active && x.category === "liquids" && !items.find((i) => i.product_id === x.product_id));
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
     const pick = pool.slice(0, 2);
-    const unitNext = liquCount >= 2 ? "15.00 €" : "16.00 €";
-    kb.unshift(pick.map((p) => ({ text: `🔥 ${p.title}${p.qty_available>0&&p.qty_available<=3?` (только ${p.qty_available}❗️)`:''} — ${unitNext}`, callback_data: encodeCb(`add_upsell:${p.product_id}`) })));
+    const unitNext = await getLiquidUnitPrice(liquCount + 1, shopConfig.cityCode);
+    kb.unshift(pick.map((p) => ({ text: `🔥 ${p.title}${p.qty_available>0&&p.qty_available<=3?` (только ${p.qty_available}❗️)`:''} — ${unitNext.toFixed(2)} €`, callback_data: encodeCb(`add_upsell:${p.product_id}`) })));
   } catch {}
   kb.push([{ text: `✅ Оформить заказ · ${totals.total_with_discount.toFixed(2)} €`, callback_data: encodeCb("confirm_order_start") }]);
   kb.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
-  const text = `<b>Корзина</b> 🛒\n${lines}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\nЭкономия: <b>${savings.toFixed(2)} €</b>` : ""}\n\n💶 Цены: <b>1 → 18€ · 2 → 32€ · 3 → 45€</b>${offer ? `\n${offer}` : ""}`;
+  const text = `<b>Корзина</b> 🛒\n${lines}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\nЭкономия: <b>${savings.toFixed(2)} €</b>` : ""}${offer ? `\n\n${await offer}` : ""}`;
   if (typeof messageId === "number") await bot.editMessageText(text, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: kb }, parse_mode: "HTML" });
   else await bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: kb }, parse_mode: "HTML" });
 }
@@ -843,29 +869,24 @@ async function showGamifiedUpsellInline(bot: TelegramBot, chatId: number, messag
   } catch {}
   const rerollsLeft = 3 - rerollCount;
   const totals = await previewTotals(user_id, items);
-  const savingsNow = computeSavings(items, all);
+  const savingsNow = await computeSavings(items, all);
   let liquCount = 0;
   for (const it of items) {
     const p = all.find((x)=>x.product_id===it.product_id);
     if (p && p.category === "liquids") liquCount += it.qty;
   }
-  const nextUnitPrice = liquCount >= 2 ? "15.00 €" : "16.00 €";
+  const nextUnitDyn = await getLiquidUnitPrice(liquCount + 1, shopConfig.cityCode);
+  const base1 = await getLiquidUnitPrice(1, shopConfig.cityCode);
+  const p3 = await getLiquidUnitPrice(3, shopConfig.cityCode);
   const motivation = liquCount === 0
-    ? `🔥 Следующий вкус — всего ${nextUnitPrice} (вместо 18 €)`
-    : (liquCount === 1 ? `🔥 Следующий вкус — всего ${nextUnitPrice} (вместо 18 €)`
-    : (liquCount === 2 ? `🔥 От 3 шт — по 15 € каждая!`
-    : `🔥 Все вкусы по 15 €!`));
+    ? `🔥 Следующий вкус — всего ${nextUnitDyn.toFixed(2)} € (вместо ${base1.toFixed(2)} €)`
+    : (liquCount === 1 ? `🔥 Следующий вкус — всего ${nextUnitDyn.toFixed(2)} € (вместо ${base1.toFixed(2)} €)`
+    : (liquCount === 2 ? `🔥 От 3 шт — по ${p3.toFixed(2)} € каждая!`
+    : `🔥 Все вкусы по ${p3.toFixed(2)} €!`));
   const cartLines = renderCart(items, all);
   const header = `${cartLines}\n\n💰 Итог: ${totals.total_with_discount.toFixed(2)} €${savingsNow>0?`\n💚 Экономия: ${savingsNow.toFixed(2)} €`:''}\n${motivation}\n\n━━━━━━━━━━━━━━━━`;
   const msg = `${header}\n🎲 Попробуй эти вкусы:\n🎰 Рероллов осталось: ${rerollsLeft}`;
-  const unitNext = (() => {
-    let liquCount = 0;
-    for (const it of items) {
-      const p = all.find((x)=>x.product_id===it.product_id);
-      if (p && p.category === "liquids") liquCount += it.qty;
-    }
-    return liquCount >= 2 ? "15.00 €" : "16.00 €";
-  })();
+  const unitNext = (await getLiquidUnitPrice(liquCount + 1, shopConfig.cityCode)).toFixed(2) + " €";
   const kb: TelegramBot.InlineKeyboardButton[][] = [
     [{ text: `💧 ${pick[0].title} — ${category==="liquids"?unitNext:fmtMoney(pick[0].price)}`, callback_data: encodeCb(`gam_upsell_add:${pick[0].product_id}`) }],
     [{ text: `💧 ${pick[1].title} — ${category==="liquids"?unitNext:fmtMoney(pick[1].price)}`, callback_data: encodeCb(`gam_upsell_add:${pick[1].product_id}`) }]
@@ -889,11 +910,12 @@ async function currentUnitPrice(user_id: number, products: Product[]): Promise<n
   return base;
 }
 
-function computeSavings(items: OrderItem[], products: Product[]): number {
+async function computeSavings(items: OrderItem[], products: Product[]): Promise<number> {
+  const baseline = await getLiquidUnitPrice(1, shopConfig.cityCode);
   let s = 0;
   for (const it of items) {
     const ip = products.find((x)=>x.product_id===it.product_id);
-    if (ip && ip.category === "liquids" && it.price < 18) s += (18 - it.price) * it.qty;
+    if (ip && ip.category === "liquids" && it.price < baseline) s += (baseline - it.price) * it.qty;
   }
   return Math.round(s * 100) / 100;
 }

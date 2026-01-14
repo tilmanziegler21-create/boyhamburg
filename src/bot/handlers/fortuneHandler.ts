@@ -3,21 +3,24 @@ import { getProducts } from "../../infra/data";
 import { getDb } from "../../infra/db/sqlite";
 import { carts, userStates, userRerollCount } from "../../infra/storage/InMemoryStorage";
 import { Product } from "../../core/types";
+import { getLiquidUnitPrice } from "../../services/PriceService";
+import { shopConfig } from "../../config/shopConfig";
 import { encodeCb } from "../cb";
 
-function computeCartTotals(userId: number, products: Product[]) {
+async function computeCartTotals(userId: number, products: Product[]) {
   const items = carts.get(userId) || [];
+  const baseline = await getLiquidUnitPrice(1, shopConfig.cityCode);
   let savings = 0;
   for (const it of items) {
     const p = products.find((x) => x.product_id === it.product_id);
-    if (p && p.category === "liquids" && it.price < 18) savings += (18 - it.price) * it.qty;
+    if (p && p.category === "liquids" && it.price < baseline) savings += (baseline - it.price) * it.qty;
   }
   const total = items.reduce((s, it) => s + Number(it.price) * Number(it.qty), 0);
   const liquQty = items.reduce((s, it) => {
     const p = products.find((x) => x.product_id === it.product_id);
     return s + (p && p.category === "liquids" ? it.qty : 0);
   }, 0);
-  const nextPrice = liquQty >= 2 ? 15 : 16;
+  const nextPrice = await getLiquidUnitPrice(liquQty + 1, shopConfig.cityCode);
   const cartLines = items.map((i) => {
     const p = products.find((x) => x.product_id === i.product_id);
     const t = p ? p.title : `#${i.product_id}`;
@@ -27,10 +30,12 @@ function computeCartTotals(userId: number, products: Product[]) {
   return { items, savings: Math.round(savings * 100) / 100, total: Math.round(total * 100) / 100, liquQty, nextPrice, cartLines };
 }
 
-function motivation(liquQty: number, nextPrice: number) {
-  if (liquQty === 1) return `🔥 Выгодное предложение:\nДобавь ещё один вкус всего за ${nextPrice.toFixed(2)} € (вместо 18 €)\n💡 Экономия 2 € на каждой жидкости!`;
-  if (liquQty === 2) return `🎉 Супер! Ты экономишь 4 €!\n\n🔥 Ещё выгоднее:\nДобавь третий вкус за 15 € и экономь уже 9 €!\n💡 При покупке 3 шт каждая стоит всего 15 €`;
-  return `🎉 Отлично! Максимальная выгода!\n💡 Каждый следующий вкус тоже по 15 €`;
+async function motivation(liquQty: number, nextPrice: number) {
+  const p1 = await getLiquidUnitPrice(1, shopConfig.cityCode);
+  const p3 = await getLiquidUnitPrice(3, shopConfig.cityCode);
+  if (liquQty === 1) return `🔥 Выгодное предложение:\nДобавь ещё один вкус всего за ${nextPrice.toFixed(2)} € (вместо ${p1.toFixed(2)} €)\n💡 Экономия на каждой жидкости!`;
+  if (liquQty === 2) return `🎉 Супер! Цены пересчитаны!\n\n🔥 Ещё выгоднее:\nДобавь третий вкус за ${p3.toFixed(2)} €\n💡 При покупке 3 шт каждая стоит ${p3.toFixed(2)} €`;
+  return `🎉 Отлично! Максимальная выгода!\n💡 Каждый следующий вкус тоже по ${p3.toFixed(2)} €`;
 }
 
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -42,7 +47,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 export async function showHybridUpsellWithGuidance(bot: TelegramBot, chatId: number, messageId: number, userId: number, category: "liquids" | "electronics", excludeIds: number[]) {
   const products = await withTimeout(getProducts(), 5000);
-  const { cartLines, total, savings, liquQty, nextPrice } = computeCartTotals(userId, products);
+  const { cartLines, total, savings, liquQty, nextPrice } = await computeCartTotals(userId, products);
   const rerollCount = userRerollCount.get(userId) || 0;
   const rerollsLeft = Math.max(0, 3 - rerollCount);
   const totalUpsells = (carts.get(userId) || []).reduce((s, it) => s + (it.is_upsell ? it.qty : 0), 0);
@@ -77,7 +82,7 @@ export async function showHybridUpsellWithGuidance(bot: TelegramBot, chatId: num
     db.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(userId, upsell2.product_id, "offered", Date.now());
   } catch {}
   userStates.set(userId, { state: "fortune_upsell", data: { category, excludeSkus: Array.from(excludeSet), shown: [upsell1.product_id, upsell2.product_id] }, lastActivity: Date.now() });
-  const txt = `✅ Отлично! Вкус добавлен в корзину:\n\n${cartLines || "Корзина пустая"}\n\n💰 Итого: ${total.toFixed(2)} €${savings>0?`\n💚 Экономия: ${savings.toFixed(2)} €`:''}\n\n${motivation(liquQty, nextPrice)}\n\n━━━━━━━━━━━━━━━━\n🎰 Фортуна вкусов\n\n💡 Как это работает:\nМы подобрали для тебя 2 популярных вкуса по выгодной цене\n• Нравится? Просто нажми на вкус\n• Не нравится? Нажми 🎲 и мы покажем другие\n• Хочешь сам выбрать? Открой полный каталог\n\n✨ У тебя ${rerollsLeft} переброса фортуны\n\n👇 Что выбираешь?`;
+  const txt = `✅ Отлично! Вкус добавлен в корзину:\n\n${cartLines || "Корзина пустая"}\n\n💰 Итого: ${total.toFixed(2)} €${savings>0?`\n💚 Экономия: ${savings.toFixed(2)} €`:''}\n\n${await motivation(liquQty, nextPrice)}\n\n━━━━━━━━━━━━━━━━\n🎰 Фортуна вкусов\n\n💡 Как это работает:\nМы подобрали для тебя 2 популярных вкуса по выгодной цене\n• Нравится? Просто нажми на вкус\n• Не нравится? Нажми 🎲 и мы покажем другие\n• Хочешь сам выбрать? Открой полный каталог\n\n✨ У тебя ${rerollsLeft} переброса фортуны\n\n👇 Что выбираешь?`;
   const suffix = (p: Product) => (p.qty_available > 0 && p.qty_available <= 3) ? ` (только ${p.qty_available}❗️)` : "";
   const kb = [
     [{ text: `💧 ${upsell1.title}${suffix(upsell1)} — ${nextPrice.toFixed(2)} €`, callback_data: encodeCb(`fortune_add:${upsell1.product_id}`) }],
