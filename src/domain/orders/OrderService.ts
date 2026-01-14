@@ -52,10 +52,17 @@ export async function createOrder(user_id: number, items: OrderItem[], source?: 
   const totals = computeTotals(items, purchaseCount);
   const segRow = db.prepare("SELECT segment FROM users WHERE user_id = ?").get(user_id) as any;
   const seg = segRow?.segment ? String(segRow.segment) : null;
+  let nextId = Number((db.prepare("SELECT MAX(order_id) AS m FROM orders").get() as any)?.m || 0) + 1;
+  try {
+    const backend = getBackend();
+    const sheetsMax = await (backend as any).getLastOrderId?.();
+    if (typeof sheetsMax === "number" && sheetsMax + 1 > nextId) nextId = sheetsMax + 1;
+  } catch {}
   const stmt = db.prepare(
-    "INSERT INTO orders(user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const info = stmt.run(
+    nextId,
     user_id,
     JSON.stringify(items),
     totals.total_without_discount,
@@ -66,7 +73,7 @@ export async function createOrder(user_id: number, items: OrderItem[], source?: 
     expiry.toISOString(),
     source || (seg === "sale10" ? "reminder" : "normal")
   );
-  const order_id = Number(info.lastInsertRowid);
+  const order_id = Number(nextId);
   await reserveItems(items, order_id);
   return {
     order_id,
