@@ -12,12 +12,18 @@ function sheetName(base: string, city: string) {
 const cache: { ts: number; rows: PriceRow[] } = { ts: 0, rows: [] };
 const TTL_MS = 5 * 60 * 1000;
 
+export function invalidateLiquidPricesCache(): void {
+  cache.ts = 0;
+  cache.rows = [];
+}
+
 export async function getLiquidUnitPrice(qty: number, city?: string): Promise<number> {
   const now = Date.now();
-  if (!cache.rows.length || now - cache.ts > TTL_MS) {
+  const disableCache = String(process.env.LIQUID_PRICE_CACHE_DISABLE || "").trim() === "1";
+  if (disableCache || !cache.rows.length || now - cache.ts > TTL_MS) {
     const c = (city || shopConfig.cityCode || "HG").trim();
     const s = sheetName("LiquidPrices", c);
-    let vr = await batchGet([`${s}!A:C`]);
+    let vr = await batchGet([`${s}!A:D`]);
     let values = vr[0]?.values || [];
     if (!values.length) {
       vr = await batchGet([`LiquidPrices!A:D`]);
@@ -37,11 +43,17 @@ export async function getLiquidUnitPrice(qty: number, city?: string): Promise<nu
     })).filter((x) => x.city && x.from > 0 && x.price > 0);
     cache.rows = parsed;
     cache.ts = now;
+    try { console.log("[LiquidPrices] Loaded rows:", parsed.length); } catch {}
   }
   const cityCode = (city || shopConfig.cityCode || "HG").trim();
   const match = cache.rows.find((r) => r.city === cityCode && qty >= r.from && (r.to ? qty <= r.to : true))
              || cache.rows.find((r) => r.city === "HG" && qty >= r.from && (r.to ? qty <= r.to : true));
-  if (match) return match.price;
+  if (match) {
+    try { console.log("Price from sheet:", cityCode, qty, match.price); } catch {}
+    return match.price;
+  }
   // fallback legacy tiers
-  return qty >= 3 ? 15 : (qty === 2 ? 16 : 18);
+  const fb = qty >= 3 ? 15 : (qty === 2 ? 16 : 18);
+  try { console.log("Price fallback:", cityCode, qty, fb); } catch {}
+  return fb;
 }
