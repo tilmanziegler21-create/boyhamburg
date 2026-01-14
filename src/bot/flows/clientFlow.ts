@@ -312,9 +312,17 @@ export function registerClientFlow(bot: TelegramBot) {
         finalKeyboard = rows.concat(finalKeyboard);
       }
       let liquCountNow = 0; for (const it of items) { const ip = products.find((x) => x.product_id === it.product_id); if (ip && ip.category === "liquids") liquCountNow += it.qty; }
-      const currentUnit = liquCountNow === 1 ? "18.00 €" : (liquCountNow === 2 ? "16.00 €" : "15.00 €");
-      const nextUnit = liquCountNow >= 2 ? "15.00 €" : "16.00 €";
-      const textLiquids = `💧 ${p.title} добавлен\n${liquCountNow} шт — ${currentUnit}\n\n🔥 Следующий вкус — ${nextUnit}\n🔥 От 3 шт — по 15 € за каждую\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? ` · Экономия: ${savings.toFixed(2)} €` : ""}`;
+      const price1 = await getLiquidUnitPrice(1, shopConfig.cityCode);
+      const price2 = await getLiquidUnitPrice(2, shopConfig.cityCode);
+      const price3 = await getLiquidUnitPrice(3, shopConfig.cityCode);
+      const pairSave = Math.max(0, Math.round((price1 * 2 - price2 * 2)));
+      const tripleSave = Math.max(0, Math.round((price1 * 3 - price3 * 3)));
+      const textLiquids =
+        liquCountNow === 1
+          ? `✅ ${p.title} добавлен\n\n💧 ${p.title} · ${price1.toFixed(2)} €\n\n💰 Итого: <b>${totals.total_with_discount.toFixed(2)} €</b>\n\n🔥 Добавь второй — обе по ${price2.toFixed(2)} €!\n💡 Экономия: ${pairSave} € на двух`
+          : (liquCountNow === 2
+              ? `✅ ${p.title} добавлен\n💰 Цены пересчитаны!\n\n${renderCart(items, products)}\n\n💰 Итого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\n💚 Сэкономил: ${savings.toFixed(2)} €` : ""}\n\n🔥 Третий = все по ${price3.toFixed(2)} €!\n� Экономия вырастет до ${tripleSave} €`
+              : `✅ ${p.title} добавлен\n💰 Максимальная скидка!\n\n${renderCart(items, products)}\n\n💰 Итого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\n💚 Сэкономил: ${savings.toFixed(2)} €` : ""}`);
       const textElectronics = `💨 ${p.title} добавлен — ${fmtMoney(p.price)}\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>`;
       const outText = p.category === "liquids" ? textLiquids : textElectronics;
       if (p.category !== "liquids") {
