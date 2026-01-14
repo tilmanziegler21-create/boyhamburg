@@ -12,6 +12,7 @@ import { encodeCb, decodeCb } from "../cb";
 import { logger } from "../../infra/logger";
 import { getDb } from "../../infra/db/sqlite";
 import { formatDate, addDays } from "../../core/time";
+import { getLiquidUnitPrice } from "../../services/PriceService";
 import { carts as cartsStore, userStates, userRerollCount } from "../../infra/storage/InMemoryStorage";
 import { showHybridUpsellWithGuidance } from "../handlers/fortuneHandler";
 import { showUpsellCatalog } from "../handlers/catalogHandler";
@@ -53,7 +54,7 @@ async function recalcLiquidPrices(user_id: number) {
     const p = products.find((x) => x.product_id === it.product_id);
     if (p && p.category === "liquids") liquCount += it.qty;
   }
-  let unit = liquCount >= 3 ? 15 : (liquCount === 2 ? 16 : 18);
+  let unit = await getLiquidUnitPrice(liquCount, shopConfig.cityCode);
   const seg = getUserSegment(user_id);
   if (seg === "sale10") unit = Math.round(unit * 0.9 * 100) / 100;
   for (const it of cart) {
@@ -874,7 +875,10 @@ async function currentUnitPrice(user_id: number, products: Product[]): Promise<n
     const p = products.find((x)=>x.product_id===it.product_id);
     if (p && p.category === "liquids") liquCount += it.qty;
   }
-  return liquCount >= 2 ? 15 : 16;
+  let base = await getLiquidUnitPrice(liquCount, shopConfig.cityCode);
+  const seg = getUserSegment(user_id);
+  if (seg === "sale10") base = Math.round(base * 0.9 * 100) / 100;
+  return base;
 }
 
 function computeSavings(items: OrderItem[], products: Product[]): number {
