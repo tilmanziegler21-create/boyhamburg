@@ -134,7 +134,7 @@ export function registerClientFlow(bot: TelegramBot) {
       ];
       try {
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "🎯 <b>Шаг 1: Выбери категорию</b>\n\nУ нас есть:\n• 💧 Жидкости — премиальные вкусы от европейских брендов\n• ⚡️ Электроника — одноразовые устройства\n\n👇 Что тебя интересует?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "🎯 <b>Выбор категории</b>\n\n💧 Жидкости\n⚡️ Электроника\n\n━━━━━━━━━━━━━━━━\n👇 Выбери:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } catch {
         await bot.sendMessage(chatId, "🎯 <b>Шаг 1: Выбери категорию</b>\n\nУ нас есть:\n• 💧 Жидкости — премиальные вкусы от европейских брендов\n• ⚡️ Электроника — одноразовые устройства\n\n👇 Что тебя интересует?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
@@ -143,7 +143,7 @@ export function registerClientFlow(bot: TelegramBot) {
     if (data === "menu_howto" || data === "how_to_order") {
       const rows = [[{ text: "🎯 Начать выбор", callback_data: "catalog" }], [{ text: "🔙 Назад", callback_data: "start" }]];
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "📖 <b>Как сделать заказ</b>\n\n1️⃣ Выбери вкусы\nНажми «🎯 Выбрать вкусы» и добавь понравившиеся жидкости в корзину\n\n2️⃣ Оформи заказ\nКогда выберешь всё что нужно, нажми «✅ Оформить заказ»\n\n3️⃣ Выбери курьера и время\nУкажи когда тебе удобно получить заказ\n\n4️⃣ Выбери оплату\nНаличные или картой — как удобно\n\n5️⃣ Получи заказ\nКурьер приедет в назначенное время. Попроси у него локацию точки выдачи\n\n⏱ Весь процесс займёт 1–2 минуты!\n\n👇 Готов заказать?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "📖 <b>Как оформить</b>\n\n1️⃣ Выбери вкусы\n2️⃣ Укажи курьера и время\n3️⃣ Выбери оплату\n\n━━━━━━━━━━━━━━━━\n⏱️ 1–2 минуты\n👇 Поехали:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "catalog_liquids") {
@@ -202,7 +202,7 @@ export function registerClientFlow(bot: TelegramBot) {
         const rows: { text: string; callback_data: string }[][] = brands.map((b) => [{ text: `💨 ${b}`, callback_data: encodeCb(`elec_brand:${b}`) }]);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
         try { await bot.deleteMessage(chatId, messageId); } catch {}
-        await bot.sendMessage(chatId, "🧪 <b>Выбор бренда (электроника)</b>\n\n👇 Выберите бренд, затем вкус", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+        await bot.sendMessage(chatId, "⚡️ <b>Бренд электроники</b>\n\n👇 Выбери:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } else {
         const page = 0;
         const per = 10;
@@ -272,7 +272,7 @@ export function registerClientFlow(bot: TelegramBot) {
       rows.push([{ text: "🛒 Корзина", callback_data: encodeCb("cart_open") }]);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, `🧪 <b>${brand}</b>\n\nШаг 3: Выбери вкус\n\nПросто нажми на понравившийся вкус, и он добавится в твою корзину 🛒\n\n� Подсказка: Не переживай если сразу не решишь — потом мы покажем тебе другие интересные вкусы!\n\n👇 Какой вкус попробуешь?`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `🧪 <b>${brand}</b>\n\nВыбери вкус\n\n━━━━━━━━━━━━━━━━\n👇 Нажми на вкус:`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "back:menu_catalog") {
@@ -500,7 +500,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const couriers = await getActiveCouriers();
       const rows: TelegramBot.InlineKeyboardButton[][] = couriers.map((c) => [{ text: `${c.name} · ${c.last_delivery_interval}`, callback_data: encodeCb(`choose_courier:${order.order_id}|${c.tg_id}`) }]);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
-      await bot.editMessageText(`🎉 Отлично! Оформляем заказ\n\n📦 Что ты заказываешь:\n${renderCart(items, await getProducts())}\n\n💰 Сумма: ${(await previewTotals(user_id, items)).total_with_discount.toFixed(2)} €\n\n━━━━━━━━━━━━━━━━\n\nШаг 1 из 4: Выбери курьера\n\nВсе наши курьеры проверены и работают быстро �\n\n👇 Какой курьер тебе удобнее?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.editMessageText(`✅ Оформление\n\n📦 Корзина:\n${renderCart(items, await getProducts())}\n\n💰 Итого: ${(await previewTotals(user_id, items)).total_with_discount.toFixed(2)} €\n\n━━━━━━━━━━━━━━━━\n🚗 Шаг 1: курьер\n👇 Выбери:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     } else if (data.startsWith("choose_courier:")) {
       const payload = data.substring("choose_courier:".length);
       const [orderIdStr, courierIdStr] = payload.split("|");
@@ -523,7 +523,7 @@ export function registerClientFlow(bot: TelegramBot) {
         [{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }],
         [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]
       ];
-      await bot.editMessageText(`✅ Курьер выбран\n\n━━━━━━━━━━━━━━━━\n\nШаг 2 из 4: Выбери день доставки\n\nКогда тебе удобно получить заказ? 📅\n\n💡 Подсказка: Доставка занимает 1–2 минуты с момента встречи с курьером\n\n👇 Какой день выбираешь?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rowsDates }, parse_mode: "HTML" });
+      await bot.editMessageText(`📅 Шаг 2: день\n\n━━━━━━━━━━━━━━━━\n👇 Выбери:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rowsDates }, parse_mode: "HTML" });
     } else if (data.startsWith("back:choose_courier:")) {
       const order_id = Number(data.split(":")[2]);
       const couriers = await getActiveCouriers();
@@ -554,7 +554,7 @@ export function registerClientFlow(bot: TelegramBot) {
         keyboard.push(row);
       }
       const backRow: TelegramBot.InlineKeyboardButton[][] = [[{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
-      await bot.editMessageText(`✅ День выбран: ${dateStr}\n\n━━━━━━━━━━━━━━━━\n\nШаг 3 из 4: Выбери точное время\n\nВо сколько тебе удобно встретиться с курьером? ⏰\n\n💡 Подсказка: Выбирай время с запасом — курьер приедет к точке выдачи в это время\n\n👇 Выбери удобный интервал:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard.concat(backRow) }, parse_mode: "HTML" });
+      await bot.editMessageText(`⏱️ Шаг 3: время\n\nДень: ${dateStr}\n━━━━━━━━━━━━━━━━\n Выбери интервал:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard.concat(backRow) }, parse_mode: "HTML" });
     } else if (data.startsWith("select_slot:")) {
       const payload = data.substring("select_slot:".length);
       const [orderIdStr, time, dateStr] = payload.split("|");
@@ -595,7 +595,7 @@ export function registerClientFlow(bot: TelegramBot) {
         [{ text: "💳 Оплата картой", callback_data: encodeCb(`pay:${order_id}|card`) }],
         [{ text: "💵 Наличные", callback_data: encodeCb(`pay:${order_id}|cash`) }]
       ];
-      await bot.editMessageText(`✅ Время выбрано: ${time}\n\n━━━━━━━━━━━━━━━━\n\nШаг 4 из 4: Выбери способ оплаты\n\nКак тебе удобно оплатить заказ? 💳\n\n💡 Подсказка:\n• Наличные — отдашь деньги курьеру при встрече\n• Карта — оплатишь через терминал у курьера\n\n👇 Как будешь платить?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
+      await bot.editMessageText(`💳 Шаг 4: оплата\n\n⏱️ ${time}\n━━━━━━━━━━━━━━━━\n👇 Выбери способ:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
       const order = await getOrderById(order_id);
       const products = await getProducts();
       const lines = (order?.items || []).map((i) => {
