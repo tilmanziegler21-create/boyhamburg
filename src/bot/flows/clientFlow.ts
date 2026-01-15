@@ -38,7 +38,7 @@ function addToCart(user_id: number, p: Product, isUpsell: boolean, priceOverride
 function renderCart(items: OrderItem[], products: Product[]) {
   const lines = items.map((i) => {
     const p = products.find((x) => x.product_id === i.product_id);
-    const t = p ? p.title : `#${i.product_id}`;
+    const t = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : `#${i.product_id}`;
     const icon = p && p.category === "electronics" ? "💨" : "💧";
     return `${icon} ${t} x${i.qty} · ${i.price.toFixed(2)} €`;
   });
@@ -78,11 +78,9 @@ export function registerClientFlow(bot: TelegramBot) {
     const username = msg.from?.username || "";
     await ensureUser(user_id, username);
     const rows: TelegramBot.InlineKeyboardButton[][] = [
-      [{ text: "🎯 Каталог", callback_data: "catalog" }],
       [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
       [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
-      [{ text: "👥 Группа в Telegram", url: shopConfig.telegramGroupUrl }],
-      [{ text: "⭐ Отзывы", url: shopConfig.reviewsUrl }]
+      [{ text: "👥 Наш канал", url: shopConfig.telegramGroupUrl }]
     ];
     const admins = (env.TELEGRAM_ADMIN_IDS || "").split(",").map((s) => Number(s.trim())).filter((x) => x);
     if (admins.includes(user_id)) rows.push([{ text: "Админ", callback_data: "admin_open" }]);
@@ -111,11 +109,9 @@ export function registerClientFlow(bot: TelegramBot) {
     const user_id = q.from.id;
     if (data === "back:main" || data === "start") {
       const rows = [
-        [{ text: "🎯 Каталог", callback_data: "catalog" }],
         [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
         [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
-        [{ text: "👥 Группа в Telegram", url: shopConfig.telegramGroupUrl }],
-        [{ text: "⭐ Отзывы", url: shopConfig.reviewsUrl }]
+        [{ text: "👥 Наш канал", url: shopConfig.telegramGroupUrl }]
       ];
       try {
       try { await bot.deleteMessage(chatId, messageId); } catch {}
@@ -177,7 +173,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const p1b = await getLiquidUnitPrice(1, shopConfig.cityCode);
       const p2b = await getLiquidUnitPrice(2, shopConfig.cityCode);
       const p3b = await getLiquidUnitPrice(3, shopConfig.cityCode);
-      await bot.sendMessage(chatId, `💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\n🧪 ELFIQ — лидер на рынке, лучшее качество\n🧪 CHASER — насыщенные вкусы\n\n${shopConfig.cityCode}: 1 → ${p1b.toFixed(2)}€ · 2 → ${p2b.toFixed(2)}€/шт · 3+ → ${p3b.toFixed(2)}€/шт\n\n👇 Что выберешь?`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\n🧪 ELFIQ — ⬇️⬇️⬇️\n🧪 CHASER — ⬇️⬇️⬇️\n\n${shopConfig.cityCode}: 1 → ${p1b.toFixed(2)}€ · 2 → ${p2b.toFixed(2)}€/шт · 3+ → ${p3b.toFixed(2)}€/шт`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
@@ -404,9 +400,9 @@ export function registerClientFlow(bot: TelegramBot) {
     rows.push([{ text: "🧴 Добавить ещё жидкости", callback_data: encodeCb("catalog_liquids") }]);
     rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
     try {
-      await bot.editMessageText(`<b>Добавлено в апсел</b>: ${p.title} — ${label}\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings2 > 0 ? ` · Экономия: ${savings2.toFixed(2)} €` : ""}`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.editMessageText(`<b>Добавлено в корзину</b>: ${p.title} — ${label}\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings2 > 0 ? ` · Экономия: ${savings2.toFixed(2)} €` : ""}`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     } catch {
-      await bot.sendMessage(chatId, `<b>Добавлено в апсел</b>: ${p.title} — ${label}\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings2 > 0 ? ` · Экономия: ${savings2.toFixed(2)} €` : ""}`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `<b>Добавлено в корзину</b>: ${p.title} — ${label}\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings2 > 0 ? ` · Экономия: ${savings2.toFixed(2)} €` : ""}`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     }
     } else if (data.startsWith("add_upsell_discount10:")) {
     const pid = Number(data.split(":")[1]);
@@ -439,9 +435,9 @@ export function registerClientFlow(bot: TelegramBot) {
     rows.push([{ text: "🧴 Добавить ещё жидкости", callback_data: encodeCb("catalog_liquids") }]);
     rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
     try {
-      await bot.editMessageText(`<b>Добавлено в апсел</b>: ${p.title} — скидка 10%\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings3 > 0 ? ` · Экономия: ${savings3.toFixed(2)} €` : ""}`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.editMessageText(`<b>Добавлено в корзину</b>: ${p.title} — скидка 10%\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings3 > 0 ? ` · Экономия: ${savings3.toFixed(2)} €` : ""}`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     } catch {
-      await bot.sendMessage(chatId, `<b>Добавлено в апсел</b>: ${p.title} — скидка 10%\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings3 > 0 ? ` · Экономия: ${savings3.toFixed(2)} €` : ""}`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `<b>Добавлено в корзину</b>: ${p.title} — скидка 10%\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings3 > 0 ? ` · Экономия: ${savings3.toFixed(2)} €` : ""}`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     }
     } else if (data === "cart_open" || data === "view_cart") {
       await showCart(bot, chatId, user_id, messageId);
@@ -601,8 +597,8 @@ export function registerClientFlow(bot: TelegramBot) {
       st2.lastActivity = Date.now();
       userStates.set(user_id, st2);
       const payKb: TelegramBot.InlineKeyboardButton[][] = [
-        [{ text: "💳 Оплата картой", callback_data: encodeCb(`pay:${order_id}|card`) }],
-        [{ text: "💵 Наличные", callback_data: encodeCb(`pay:${order_id}|cash`) }]
+        [{ text: "� Наличные", callback_data: encodeCb(`pay:${order_id}|cash`) }],
+        [{ text: "� Оплата картой", callback_data: encodeCb(`pay:${order_id}|card`) }]
       ];
       await bot.editMessageText(`💳 Шаг 4: оплата\n\n⏱️ ${time}\n━━━━━━━━━━━━━━━━\n👇 Выбери способ:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
       const order = await getOrderById(order_id);
