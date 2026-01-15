@@ -33,8 +33,11 @@ async function computeCartTotals(userId: number, products: Product[]) {
 async function motivation(liquQty: number, nextPrice: number) {
   const p1 = await getLiquidUnitPrice(1, shopConfig.cityCode);
   const p3 = await getLiquidUnitPrice(3, shopConfig.cityCode);
-  if (liquQty === 1) return `🔥 Выгодное предложение:\nДобавь ещё один вкус всего за ${nextPrice.toFixed(2)} € (вместо ${p1.toFixed(2)} €)\n💡 Экономия на каждой жидкости!`;
-  if (liquQty === 2) return `🎉 Супер! Цены пересчитаны!\n\n🔥 Ещё выгоднее:\nДобавь третий вкус за ${p3.toFixed(2)} €\n💡 При покупке 3 шт каждая стоит ${p3.toFixed(2)} €`;
+  if (liquQty === 1) {
+    const save = Math.max(0, Math.round((p1 * 2 - nextPrice * 2)));
+    return `🔥 Выгодное предложение:\nДобавь ещё один вкус и получи две жидкости по ${nextPrice.toFixed(2)}€ (экономия ${save} €)`;
+  }
+  if (liquQty === 2) return `🎉 Цены пересчитаны!\n\n🔥 Добавь третий: по ${p3.toFixed(2)}€ каждая`;
   return `🎉 Отлично! Максимальная выгода!\n💡 Каждый следующий вкус тоже по ${p3.toFixed(2)} €`;
 }
 
@@ -82,7 +85,7 @@ export async function showHybridUpsellWithGuidance(bot: TelegramBot, chatId: num
     db.prepare("INSERT INTO upsell_events(user_id, product_id, event_type, timestamp) VALUES (?,?,?,?)").run(userId, upsell2.product_id, "offered", Date.now());
   } catch {}
   userStates.set(userId, { state: "fortune_upsell", data: { category, excludeSkus: Array.from(excludeSet), shown: [upsell1.product_id, upsell2.product_id] }, lastActivity: Date.now() });
-  const txt = `✅ Вкус добавлен в корзину:\n\n${cartLines || "Корзина пустая"}\n\n💰 Итого: ${total.toFixed(2)} €${savings>0?`\n💚 Экономия: ${savings.toFixed(2)} €`:''}\n\n${await motivation(liquQty, nextPrice)}\n\n━━━━━━━━━━━━━━━━\n� Выбери:`;
+  const txt = `✅ Вкус добавлен в корзину:\n\n${cartLines || "Корзина пустая"}\n\n💰 Итого: ${total.toFixed(2)} €${savings>0?`\n💚 Экономия: ${savings.toFixed(2)} €`:''}\n\n${await motivation(liquQty, nextPrice)}\n\n━━━━━━━━━━━━━━━━\n👇 Выбери ещё один вкус:`;
   const suffix = (p: Product) => (p.qty_available > 0 && p.qty_available <= 3) ? ` (только ${p.qty_available}❗️)` : "";
   const kb = [
     [{ text: `💧 ${upsell1.title}${suffix(upsell1)} — ${nextPrice.toFixed(2)} €`, callback_data: encodeCb(`fortune_add:${upsell1.product_id}`) }],

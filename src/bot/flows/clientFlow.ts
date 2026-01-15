@@ -78,7 +78,7 @@ export function registerClientFlow(bot: TelegramBot) {
     const username = msg.from?.username || "";
     await ensureUser(user_id, username);
     const rows: TelegramBot.InlineKeyboardButton[][] = [
-      [{ text: "🎯 Выбрать вкусы", callback_data: "catalog" }],
+      [{ text: "🎯 Каталог", callback_data: "catalog" }],
       [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
       [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
       [{ text: "👥 Группа в Telegram", url: shopConfig.telegramGroupUrl }],
@@ -111,7 +111,7 @@ export function registerClientFlow(bot: TelegramBot) {
     const user_id = q.from.id;
     if (data === "back:main" || data === "start") {
       const rows = [
-        [{ text: "🎯 Выбрать вкусы", callback_data: "catalog" }],
+        [{ text: "🎯 Каталог", callback_data: "catalog" }],
         [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
         [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
         [{ text: "👥 Группа в Telegram", url: shopConfig.telegramGroupUrl }],
@@ -134,9 +134,9 @@ export function registerClientFlow(bot: TelegramBot) {
       ];
       try {
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "🎯 <b>Выбор категории</b>\n\n💧 Жидкости\n⚡️ Электроника\n\n━━━━━━━━━━━━━━━━\n👇 Выбери:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "🎯 <b>Наш ассортимент</b>\n\n💧 Жидкости\n⚡️ Одноразовые устройства\n\n━━━━━━━━━━━━━━━━\n👇 Выбери:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } catch {
-        await bot.sendMessage(chatId, "🎯 <b>Шаг 1: Выбери категорию</b>\n\nУ нас есть:\n• 💧 Жидкости — премиальные вкусы от европейских брендов\n• ⚡️ Электроника — одноразовые устройства\n\n👇 Что тебя интересует?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+        await bot.sendMessage(chatId, "🎯 <b>Наш ассортимент</b>\n\n💧 Жидкости\n⚡️ Одноразовые устройства\n\n━━━━━━━━━━━━━━━━\n👇 Выбери:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
@@ -177,7 +177,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const p1b = await getLiquidUnitPrice(1, shopConfig.cityCode);
       const p2b = await getLiquidUnitPrice(2, shopConfig.cityCode);
       const p3b = await getLiquidUnitPrice(3, shopConfig.cityCode);
-      await bot.sendMessage(chatId, `💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\n🧪 ELFIQ — насыщенные\n🧪 CHASER — освежающие\n\n� ${shopConfig.cityCode}: 1 → ${p1b.toFixed(2)}€ · 2 → ${p2b.toFixed(2)}€/шт · 3+ → ${p3b.toFixed(2)}€/шт\n\n👇 Какой бренд смотрим?`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\n🧪 ELFIQ — лидер на рынке, лучшее качество\n🧪 CHASER — насыщенные вкусы\n\n${shopConfig.cityCode}: 1 → ${p1b.toFixed(2)}€ · 2 → ${p2b.toFixed(2)}€/шт · 3+ → ${p3b.toFixed(2)}€/шт\n\n👇 Что выберешь?`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
