@@ -78,7 +78,9 @@ export function registerClientFlow(bot: TelegramBot) {
     const username = msg.from?.username || "";
     await ensureUser(user_id, username);
     const rows: TelegramBot.InlineKeyboardButton[][] = [
-      [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
+      [{ text: "� Жидкости", callback_data: encodeCb("catalog_liquids") }],
+      [{ text: "⚡️ Одноразовые устройства", callback_data: encodeCb("catalog_electronics") }],
+      [{ text: "�🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
       [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
       [{ text: "👥 Наш канал", url: shopConfig.telegramGroupUrl }]
     ];
@@ -109,6 +111,8 @@ export function registerClientFlow(bot: TelegramBot) {
     const user_id = q.from.id;
     if (data === "back:main" || data === "start") {
       const rows = [
+        [{ text: "💧 Жидкости", callback_data: encodeCb("catalog_liquids") }],
+        [{ text: "⚡️ Одноразовые устройства", callback_data: encodeCb("catalog_electronics") }],
         [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
         [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
         [{ text: "👥 Наш канал", url: shopConfig.telegramGroupUrl }]
