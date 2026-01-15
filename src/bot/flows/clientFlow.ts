@@ -134,16 +134,16 @@ export function registerClientFlow(bot: TelegramBot) {
       ];
       try {
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "🎯 <b>Наш ассортимент</b>\n\n💧 Жидкости\n⚡️ Одноразовые устройства\n\n━━━━━━━━━━━━━━━━\n👇 Выбери:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "🎯 <b>Наш ассортимент</b>\n\n💧 Жидкости\n⚡️ Одноразки", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } catch {
-        await bot.sendMessage(chatId, "🎯 <b>Наш ассортимент</b>\n\n💧 Жидкости\n⚡️ Одноразовые устройства\n\n━━━━━━━━━━━━━━━━\n👇 Выбери:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+        await bot.sendMessage(chatId, "🎯 <b>Наш ассортимент</b>\n\n💧 Жидкости\n⚡️ Одноразки", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
     if (data === "menu_howto" || data === "how_to_order") {
       const rows = [[{ text: "🎯 Начать выбор", callback_data: "catalog" }], [{ text: "🔙 Назад", callback_data: "start" }]];
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "📖 <b>Как оформить</b>\n\n1️⃣ Выбери вкусы\n2️⃣ Укажи курьера и время\n3️⃣ Выбери оплату\n\n━━━━━━━━━━━━━━━━\n⏱️ 1–2 минуты\n👇 Поехали:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "📖 <b>Как оформить</b>\n\n1️⃣ Выбор вкусов\n2️⃣ Курьер и время\n3️⃣ Оплата", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "catalog_liquids") {
@@ -169,7 +169,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const p1 = await getLiquidUnitPrice(1, shopConfig.cityCode);
       const p2 = await getLiquidUnitPrice(2, shopConfig.cityCode);
       const p3 = await getLiquidUnitPrice(3, shopConfig.cityCode);
-      await bot.sendMessage(chatId, `📦 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 ${shopConfig.cityCode}: 1 → ${p1.toFixed(2)}€ · 2 → ${p2.toFixed(2)}€/шт · 3+ → ${p3.toFixed(2)}€/шт\n\n👇 Нажмите на товар, чтобы добавить в корзину`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `📦 <b>Каталог вкусов</b>\n\n💶 ${shopConfig.cityCode}: 1 → ${p1.toFixed(2)}€ · 2 → ${p2.toFixed(2)}€/шт · 3+ → ${p3.toFixed(2)}€/шт`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } else {
         const rows: { text: string; callback_data: string }[][] = brands.map((b) => [{ text: `💧 ${b}`, callback_data: encodeCb(`liq_brand:${b}`) }]);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
@@ -198,7 +198,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const p1c = await getLiquidUnitPrice(1, shopConfig.cityCode);
       const p2c = await getLiquidUnitPrice(2, shopConfig.cityCode);
       const p3c = await getLiquidUnitPrice(3, shopConfig.cityCode);
-      await bot.sendMessage(chatId, `🎯 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 ${shopConfig.cityCode}: 1 → ${p1c.toFixed(2)}€ · 2 → ${p2c.toFixed(2)}€/шт · 3+ → ${p3c.toFixed(2)}€/шт\n\n👇 Нажмите на товар, чтобы добавить в корзину`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `🎯 <b>Каталог вкусов</b>\n\n💶 ${shopConfig.cityCode}: 1 → ${p1c.toFixed(2)}€ · 2 → ${p2c.toFixed(2)}€/шт · 3+ → ${p3c.toFixed(2)}€/шт`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "catalog_electronics") {
@@ -211,7 +211,7 @@ export function registerClientFlow(bot: TelegramBot) {
         const rows: { text: string; callback_data: string }[][] = brands.map((b) => [{ text: `💨 ${b}`, callback_data: encodeCb(`elec_brand:${b}`) }]);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
         try { await bot.deleteMessage(chatId, messageId); } catch {}
-        await bot.sendMessage(chatId, "⚡️ <b>Бренд электроники</b>\n\n👇 Выбери:", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+        await bot.sendMessage(chatId, "⚡️ <b>Бренд электроники</b>", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } else {
         const page = 0;
         const per = 10;
@@ -223,7 +223,7 @@ export function registerClientFlow(bot: TelegramBot) {
         if (nav.length) rows.push(nav);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
         try { await bot.deleteMessage(chatId, messageId); } catch {}
-        await bot.sendMessage(chatId, "📦 <b>Каталог электроники</b>\nВыберите позицию.\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+        await bot.sendMessage(chatId, "📦 <b>Каталог электроники</b>", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
@@ -241,7 +241,7 @@ export function registerClientFlow(bot: TelegramBot) {
       if (nav.length) rows.push(nav);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "📦 <b>Каталог электроники</b>\nВыберите позицию.", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "📦 <b>Каталог электроники</b>", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data.startsWith("elec_brand:")) {
@@ -281,7 +281,7 @@ export function registerClientFlow(bot: TelegramBot) {
       rows.push([{ text: "🛒 Корзина", callback_data: encodeCb("cart_open") }]);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, `🧪 <b>${brand}</b>\n\nВыбери вкус\n\n━━━━━━━━━━━━━━━━\n👇 Нажми на вкус:`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `🧪 <b>${brand}</b>\n\nВкусы`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "back:menu_catalog") {
@@ -509,7 +509,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const couriers = await getActiveCouriers();
       const rows: TelegramBot.InlineKeyboardButton[][] = couriers.map((c) => [{ text: `${c.name} · ${c.last_delivery_interval}`, callback_data: encodeCb(`choose_courier:${order.order_id}|${c.tg_id}`) }]);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
-      await bot.editMessageText(`✅ Оформление\n\n📦 Корзина:\n${renderCart(items, await getProducts())}\n\n💰 Итого: ${(await previewTotals(user_id, items)).total_with_discount.toFixed(2)} €\n\n━━━━━━━━━━━━━━━━\n🚗 Шаг 1: курьер\n👇 Выбери:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.editMessageText(`✅ Оформление\n\n📦 Корзина:\n${renderCart(items, await getProducts())}\n\n💰 Итого: ${(await previewTotals(user_id, items)).total_with_discount.toFixed(2)} €\n\n🚗 Шаг 1: Курьер`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     } else if (data.startsWith("choose_courier:")) {
       const payload = data.substring("choose_courier:".length);
       const [orderIdStr, courierIdStr] = payload.split("|");
@@ -538,7 +538,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const couriers = await getActiveCouriers();
       const rows: TelegramBot.InlineKeyboardButton[][] = couriers.map((c) => [{ text: `${c.name} · ${c.last_delivery_interval}`, callback_data: `choose_courier:${order_id}|${c.tg_id}` }]);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
-      await bot.editMessageText(`<b>Выберите курьера</b>`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      await bot.editMessageText(`<b>Курьер</b>`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
     } else if (data.startsWith("select_date:")) {
       const [orderIdStr, dateStr] = data.substring("select_date:".length).split("|");
       const order_id = Number(orderIdStr);
@@ -574,7 +574,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const interval = chosen?.last_delivery_interval || couriers[0]?.last_delivery_interval || "14:00-16:00";
       const ok = validateSlot(interval, time);
       if (!ok) {
-        await bot.editMessageText("<b>Слот недоступен</b>. Выберите другой.", { chat_id: chatId, message_id: messageId, parse_mode: "HTML" });
+        await bot.editMessageText("<b>Слот недоступен</b>", { chat_id: chatId, message_id: messageId, parse_mode: "HTML" });
         return;
       }
       const isFree = chosen ? !getOccupiedSlots(chosen.tg_id, dateStr).has(time) : true;
@@ -591,7 +591,7 @@ export function registerClientFlow(bot: TelegramBot) {
           keyboard2.push(row);
         }
         const backRow2: TelegramBot.InlineKeyboardButton[][] = [[{ text: "⬅️ Назад", callback_data: encodeCb(`select_date:${order_id}|${dateStr}`) }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
-        await bot.editMessageText(`<b>Слот занят</b>. Выберите другой.`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard2.concat(backRow2) }, parse_mode: "HTML" });
+        await bot.editMessageText(`<b>Слот занят</b>`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard2.concat(backRow2) }, parse_mode: "HTML" });
         return;
       }
       await setDeliverySlot(order_id, interval, time, dateStr);
