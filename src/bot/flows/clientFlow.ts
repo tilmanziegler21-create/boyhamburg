@@ -532,7 +532,7 @@ export function registerClientFlow(bot: TelegramBot) {
         [{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }],
         [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]
       ];
-      await bot.editMessageText(`📅 Шаг 2: день\n\n━━━━━━━━━━━━━━━━\n👇 Выбери:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rowsDates }, parse_mode: "HTML" });
+      await bot.editMessageText(`📅 Шаг 2: День`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: rowsDates }, parse_mode: "HTML" });
     } else if (data.startsWith("back:choose_courier:")) {
       const order_id = Number(data.split(":")[2]);
       const couriers = await getActiveCouriers();
@@ -563,7 +563,7 @@ export function registerClientFlow(bot: TelegramBot) {
         keyboard.push(row);
       }
       const backRow: TelegramBot.InlineKeyboardButton[][] = [[{ text: "⬅️ Назад", callback_data: encodeCb(`back:choose_courier:${order_id}`) }], [{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
-      await bot.editMessageText(`⏱️ Шаг 3: время\n\nДень: ${dateStr}\n━━━━━━━━━━━━━━━━\n Выбери интервал:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard.concat(backRow) }, parse_mode: "HTML" });
+      await bot.editMessageText(`⏱️ Шаг 3: Время\nДень: ${dateStr}`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard.concat(backRow) }, parse_mode: "HTML" });
     } else if (data.startsWith("select_slot:")) {
       const payload = data.substring("select_slot:".length);
       const [orderIdStr, time, dateStr] = payload.split("|");
@@ -604,12 +604,12 @@ export function registerClientFlow(bot: TelegramBot) {
         [{ text: "� Наличные", callback_data: encodeCb(`pay:${order_id}|cash`) }],
         [{ text: "� Оплата картой", callback_data: encodeCb(`pay:${order_id}|card`) }]
       ];
-      await bot.editMessageText(`💳 Шаг 4: оплата\n\n⏱️ ${time}\n━━━━━━━━━━━━━━━━\n👇 Выбери способ:`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
+      await bot.editMessageText(`💳 Шаг 4: Оплата\n⏱️ ${time}`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
       const order = await getOrderById(order_id);
       const products = await getProducts();
       const lines = (order?.items || []).map((i) => {
         const p = products.find((x) => x.product_id === i.product_id);
-        const t = p ? p.title : `#${i.product_id}`;
+        const t = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : `#${i.product_id}`;
         return `${t} x${i.qty} · ${(i.price).toFixed(2)} €`;
       }).join("\n");
       const orderAssigned2 = await getOrderById(order_id);

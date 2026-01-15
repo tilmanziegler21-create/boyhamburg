@@ -8,7 +8,7 @@ function renderCart(userId: number, products: Awaited<ReturnType<typeof getProdu
   const items = carts.get(userId) || [];
   const lines = items.map((i) => {
     const p = products.find((x) => x.product_id === i.product_id);
-    const t = p ? p.title : `#${i.product_id}`;
+    const t = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : `#${i.product_id}`;
     const icon = p && p.category === "electronics" ? "💨" : "💧";
     return `${icon} ${t} x${i.qty} · ${i.price.toFixed(2)} €`;
   }).join("\n") || "Корзина пустая";
@@ -31,7 +31,7 @@ export async function showUpsellCatalog(bot: TelegramBot, chatId: number, messag
   const available = products.filter(p => p.active && p.category === category && p.qty_available > 0 && !exclude.has(p.product_id));
   available.sort((a, b) => String(a.title).localeCompare(String(b.title)));
   const { lines, total, savings } = renderCart(userId, products);
-  const txt = `✅ Твоя корзина:\n\n${lines}\n\n💰 Итого: ${total.toFixed(2)} €${savings>0?`\n💚 Экономия: ${savings.toFixed(2)} €`:''}\n\n━━━━━━━━━━━━━━━━\n📖 Полный каталог вкусов\n\n💡 Цена следующего вкуса: ${Number(price).toFixed(2)} €\n\nПросто нажми на вкус который хочешь добавить:`;
+  const txt = `✅ Твоя корзина:\n\n${lines}\n\n💰 Итого: ${total.toFixed(2)} €${savings>0?`\n💚 Экономия: ${savings.toFixed(2)} €`:''}\n\n📖 Полный каталог вкусов\n\nЦена следующего вкуса: ${Number(price).toFixed(2)} €`;
   const kb: TelegramBot.InlineKeyboardButton[][] = [];
   const suffix = (p: any) => (p.qty_available > 0 && p.qty_available <= 3) ? ` (только ${p.qty_available}❗️)` : "";
   for (let i = 0; i < available.length; i += 2) {
@@ -46,6 +46,7 @@ export async function showUpsellCatalog(bot: TelegramBot, chatId: number, messag
     }
     kb.push(row);
   }
-  kb.push([{ text: "✅ Хватит, оформить заказ", callback_data: encodeCb("view_cart") }]);
+  kb.push([{ text: "⬅️ Корзина", callback_data: encodeCb("view_cart") }]);
+  kb.push([{ text: "✅ Оформить заказ", callback_data: encodeCb("confirm_order") }]);
   try { await bot.editMessageText(txt, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: kb }, parse_mode: "HTML" }); } catch {}
 }
