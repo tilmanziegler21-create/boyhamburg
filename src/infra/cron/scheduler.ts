@@ -11,6 +11,8 @@ import { purgeNotIssuedOlderThan } from "../../domain/orders/OrderService";
 import { NOT_ISSUED_DELETE_AFTER_MINUTES } from "../../core/constants";
 import { shopConfig } from "../../config/shopConfig";
 import { ReportService } from "../../services/ReportService";
+import { batchGet } from "../sheets/SheetsClient";
+import { getProducts } from "../data";
 
 export async function generateDailySummaryText(): Promise<string> {
   const db = getDb();
@@ -108,6 +110,56 @@ export async function sendDailySummary() {
       try {
         await bot.sendMessage(id, summary);
       } catch {}
+    }
+    try {
+      const city = shopConfig.cityCode;
+      const sheet = (process.env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY") ? `orders_${city}` : "orders";
+      const vr = await batchGet([`${sheet}!A:Z`]);
+      const values = vr[0]?.values || [];
+      const headers = values[0] || [];
+      const rows = values.slice(1);
+      const idx = (name: string) => headers.indexOf(name);
+      const createdIdx = idx("created_at");
+      const statusIdx = idx("status");
+      const itemsIdx = idx("items_json");
+      const today = new Date().toISOString().slice(0,10);
+      const deliveredRows = rows.filter(r => String(createdIdx>=0 ? r[createdIdx]||"" : "").slice(0,10)===today && String(statusIdx>=0 ? r[statusIdx]||"" : "").toLowerCase()==="delivered");
+      const products = await getProducts();
+      const map: Record<number, { qty: number; sum: number; title: string; brand: string }> = {};
+      for (const r of deliveredRows) {
+        const itemsJson = String(itemsIdx>=0 ? r[itemsIdx]||"[]" : "[]");
+        try {
+          const items = JSON.parse(itemsJson) as Array<{ product_id: number; qty: number; price: number }>;
+          for (const it of items) {
+            const p = products.find(x=>x.product_id===it.product_id);
+            const key = it.product_id;
+            const cur = map[key] || { qty: 0, sum: 0, title: p ? p.title : `#${key}`, brand: p?.brand || "" };
+            cur.qty += Number(it.qty||0);
+            cur.sum += Number(it.price||0) * Number(it.qty||0);
+            map[key] = cur;
+          }
+        } catch {}
+      }
+      const sorted = Object.entries(map).sort((a,b)=>b[1].qty - a[1].qty);
+      const lines: string[] = [];
+      lines.push("📦 Продажи (доставленные)");
+      lines.push("");
+      for (const [, v] of sorted.slice(0, 20)) {
+        const brandPart = v.brand ? `${v.brand} · ` : "";
+        lines.push(`• ${brandPart}${v.title} — ${v.qty} шт · ${(v.sum).toFixed(2)}€`);
+      }
+      if (sorted.length) {
+        const top = sorted[0][1];
+        const brandPart = top.brand ? `${top.brand} · ` : "";
+        lines.push("");
+        lines.push(`🔥 Топ вкус: ${brandPart}${top.title} — ${top.qty} шт`);
+      }
+      const detail = lines.join("\n");
+      for (const id of adminIds) {
+        try { await bot.sendMessage(id, detail); } catch {}
+      }
+    } catch (e) {
+      logger.warn("Daily detail summary error", { error: String(e) });
     }
   } catch (e) {
     logger.error("Admin daily report error", { error: String(e) });

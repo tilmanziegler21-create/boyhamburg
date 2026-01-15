@@ -166,12 +166,18 @@ export function registerClientFlow(bot: TelegramBot) {
         if (nav.length) rows.push(nav);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "📦 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 Цены автоматически зависят от количества и города.\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      const p1 = await getLiquidUnitPrice(1, shopConfig.cityCode);
+      const p2 = await getLiquidUnitPrice(2, shopConfig.cityCode);
+      const p3 = await getLiquidUnitPrice(3, shopConfig.cityCode);
+      await bot.sendMessage(chatId, `📦 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 ${shopConfig.cityCode}: 1 → ${p1.toFixed(2)}€ · 2 → ${p2.toFixed(2)}€/шт · 3+ → ${p3.toFixed(2)}€/шт\n\n👇 Нажмите на товар, чтобы добавить в корзину`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       } else {
         const rows: { text: string; callback_data: string }[][] = brands.map((b) => [{ text: `💧 ${b}`, callback_data: encodeCb(`liq_brand:${b}`) }]);
         rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\n🧪 ELFIQ — насыщенные вкусы\n🧪 CHASER — освежающие миксы\n\n💰 Цена автоматически зависит от количества и города.\n\n👇 Какой бренд смотрим?", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      const p1b = await getLiquidUnitPrice(1, shopConfig.cityCode);
+      const p2b = await getLiquidUnitPrice(2, shopConfig.cityCode);
+      const p3b = await getLiquidUnitPrice(3, shopConfig.cityCode);
+      await bot.sendMessage(chatId, `💧 <b>Шаг 2: Выбери бренд жидкостей</b>\n\n🧪 ELFIQ — насыщенные\n🧪 CHASER — освежающие\n\n� ${shopConfig.cityCode}: 1 → ${p1b.toFixed(2)}€ · 2 → ${p2b.toFixed(2)}€/шт · 3+ → ${p3b.toFixed(2)}€/шт\n\n👇 Какой бренд смотрим?`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       }
       return;
     }
@@ -189,7 +195,10 @@ export function registerClientFlow(bot: TelegramBot) {
       if (nav.length) rows.push(nav);
       rows.push([{ text: "⬅️ Назад", callback_data: encodeCb("back:main") }]);
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "🎯 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 Цена автоматически зависит от количества и города.\n\n👇 Нажмите на товар, чтобы добавить в корзину", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      const p1c = await getLiquidUnitPrice(1, shopConfig.cityCode);
+      const p2c = await getLiquidUnitPrice(2, shopConfig.cityCode);
+      const p3c = await getLiquidUnitPrice(3, shopConfig.cityCode);
+      await bot.sendMessage(chatId, `🎯 <b>Каталог вкусов</b>\nВыберите позицию.\n\n💶 ${shopConfig.cityCode}: 1 → ${p1c.toFixed(2)}€ · 2 → ${p2c.toFixed(2)}€/шт · 3+ → ${p3c.toFixed(2)}€/шт\n\n👇 Нажмите на товар, чтобы добавить в корзину`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "catalog_electronics") {
