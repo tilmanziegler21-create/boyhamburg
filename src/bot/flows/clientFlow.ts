@@ -78,9 +78,9 @@ export function registerClientFlow(bot: TelegramBot) {
     const username = msg.from?.username || "";
     await ensureUser(user_id, username);
     const rows: TelegramBot.InlineKeyboardButton[][] = [
-      [{ text: "� Жидкости", callback_data: encodeCb("catalog_liquids") }],
+      [{ text: "💧 Жидкости", callback_data: encodeCb("catalog_liquids") }],
       [{ text: "⚡️ Одноразки", callback_data: encodeCb("catalog_electronics") }],
-      [{ text: "�🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
+      [{ text: "🛒 Моя корзина", callback_data: encodeCb("view_cart") }],
       [{ text: "❓ Как заказать?", callback_data: "how_to_order" }],
       [{ text: "👥 Наш канал", url: shopConfig.telegramGroupUrl }]
     ];
@@ -338,7 +338,7 @@ export function registerClientFlow(bot: TelegramBot) {
         liquCountNow === 1
           ? `✅ ${p.title} добавлен\n\n💧 ${p.title} · ${price1.toFixed(2)} €\n\n💰 Итого: <b>${totals.total_with_discount.toFixed(2)} €</b>\n\n🔥 Добавь второй — обе по ${price2.toFixed(2)} €!\n💡 Экономия: ${pairSave} € на двух`
           : (liquCountNow === 2
-              ? `✅ ${p.title} добавлен\n💰 Цены пересчитаны!\n\n${renderCart(items, products)}\n\n💰 Итого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\n💚 Сэкономил: ${savings.toFixed(2)} €` : ""}\n\n🔥 Третий = все по ${price3.toFixed(2)} €!\n� Экономия вырастет до ${tripleSave} €`
+              ? `✅ ${p.title} добавлен\n💰 Цены пересчитаны!\n\n${renderCart(items, products)}\n\n💰 Итого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\n💚 Сэкономил: ${savings.toFixed(2)} €` : ""}\n\n🔥 Третий = все по ${price3.toFixed(2)} €!\n💸 Экономия вырастет до ${tripleSave} €`
               : `✅ ${p.title} добавлен\n💰 Максимальная скидка!\n\n${renderCart(items, products)}\n\n💰 Итого: <b>${totals.total_with_discount.toFixed(2)} €</b>${savings > 0 ? `\n💚 Сэкономил: ${savings.toFixed(2)} €` : ""}`);
       const textElectronics = `💨 ${p.title} добавлен — ${fmtMoney(p.price)}\n${renderCart(items, products)}\n\nИтого: <b>${totals.total_with_discount.toFixed(2)} €</b>`;
       const outText = p.category === "liquids" ? textLiquids : textElectronics;
@@ -601,8 +601,8 @@ export function registerClientFlow(bot: TelegramBot) {
       st2.lastActivity = Date.now();
       userStates.set(user_id, st2);
       const payKb: TelegramBot.InlineKeyboardButton[][] = [
-        [{ text: "� Наличные", callback_data: encodeCb(`pay:${order_id}|cash`) }],
-        [{ text: "� Оплата картой", callback_data: encodeCb(`pay:${order_id}|card`) }]
+        [{ text: "💵 Наличные", callback_data: encodeCb(`pay:${order_id}|cash`) }],
+        [{ text: "💳 Оплата картой", callback_data: encodeCb(`pay:${order_id}|card`) }]
       ];
       await bot.editMessageText(`💳 Шаг 4: Оплата\n⏱️ ${time}`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: payKb }, parse_mode: "HTML" });
       const order = await getOrderById(order_id);
