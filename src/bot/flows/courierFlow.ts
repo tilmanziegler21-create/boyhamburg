@@ -14,38 +14,73 @@ function getDateString(offset: number) {
   return d.toISOString().slice(0, 10);
 }
 
-async function updateOrderInSheets(orderId: number, updates: Record<string, any>, cityCodeOverride?: string) {
+async function updateOrderInSheets(orderId: number, updates: Record<string, any>, cityCodeOverride?: string): Promise<boolean> {
   const api = google.sheets({ version: "v4" });
   const sheet = env.GOOGLE_SHEETS_SPREADSHEET_ID;
   const city = String(cityCodeOverride || shopConfig.cityCode);
   const name = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `orders_${city}` : "orders";
-  try { console.log("🔍 Sheets update start", { orderId, updates, sheet: name }); } catch {}
-  const resp = await api.spreadsheets.values.get({ spreadsheetId: sheet, range: `${name}!A:Z` });
-  const values = resp.data.values || [];
-  if (!values.length) return;
-  const headers = values[0].map(String);
-  const idx = (n: string) => headers.indexOf(n);
-  const idIdx = idx("order_id");
-  if (idIdx < 0) return;
-  let rowIndex = -1;
-  for (let i = 1; i < values.length; i++) {
-    const r = values[i];
-    if (Number(r[idIdx]) === Number(orderId)) { rowIndex = i; break; }
+  try {
+    console.log("──────────────────────────────");
+    console.log("📝 updateOrderInSheets НАЧАЛО");
+    console.log("  Sheet:", name);
+    console.log("  Order:", orderId);
+    console.log("  Updates:", updates);
+    console.log("  📋 Загрузка из Sheets...");
+    const resp = await api.spreadsheets.values.get({ spreadsheetId: sheet, range: `${name}!A:Z` });
+    const values = resp.data.values || [];
+    console.log("  📋 Строк получено:", values.length);
+    if (!values.length) {
+      console.log("  ❌ Sheet пустой!");
+      console.log("──────────────────────────────");
+      return false;
+    }
+    const headers = (values[0] || []).map(String);
+    console.log("  📋 Headers:", headers);
+    const orderIdIdx = headers.findIndex((h) => h === "order_id" || h === "Order ID" || h.toLowerCase() === "orderid");
+    console.log("  📋 order_id index:", orderIdIdx);
+    if (orderIdIdx === -1) {
+      console.log("  ❌ order_id колонка не найдена!");
+      console.log("──────────────────────────────");
+      return false;
+    }
+    console.log("  🔍 Ищем заказ #", orderId);
+    let rowIndex = -1;
+    for (let i = 1; i < values.length; i++) {
+      const cellValue = values[i][orderIdIdx];
+      console.log(`    Строка ${i}: order_id = ${cellValue}`);
+      if (Number(cellValue) === Number(orderId)) { rowIndex = i; console.log(`  ✅ НАЙДЕНО в строке ${i}`); break; }
+    }
+    if (rowIndex === -1) {
+      console.log("  ❌ Заказ не найден в Sheets!");
+      console.log("──────────────────────────────");
+      return false;
+    }
+    const row = [...values[rowIndex]];
+    console.log("  📝 Строка ДО:", row.slice(0, 10));
+    for (const [key, value] of Object.entries(updates)) {
+      const colIdx = headers.findIndex((h) => h === key || h.toLowerCase() === key.toLowerCase() || h.replace(/\s/g, "_").toLowerCase() === key.toLowerCase());
+      console.log(`  📝 Обновление ${key}: колонка ${colIdx} (${headers[colIdx]}) →`, value);
+      if (colIdx >= 0) { row[colIdx] = String(value); console.log("    ✅ Обновлено"); } else { console.log("    ⚠️ Колонка не найдена"); }
+    }
+    console.log("  📝 Строка ПОСЛЕ:", row.slice(0, 10));
+    const range = `${name}!A${rowIndex + 1}:Z${rowIndex + 1}`;
+    console.log("  💾 Запись в range:", range);
+    await api.spreadsheets.values.update({
+      spreadsheetId: sheet,
+      range,
+      valueInputOption: "RAW",
+      requestBody: { values: [row] }
+    });
+    console.log("  ✅ Записано в Sheets");
+    console.log("✅ updateOrderInSheets УСПЕХ");
+    console.log("──────────────────────────────");
+    return true;
+  } catch (error: any) {
+    console.log("❌ updateOrderInSheets ОШИБКА:", error);
+    try { console.log("  Stack:", error?.stack); } catch {}
+    console.log("──────────────────────────────");
+    return false;
   }
-  if (rowIndex < 0) return;
-  const row = [...values[rowIndex]];
-  for (const [k, v] of Object.entries(updates)) {
-    const ci = idx(k);
-    if (ci >= 0) row[ci] = String(v);
-  }
-  const range = `${name}!A${rowIndex + 1}:Z${rowIndex + 1}`;
-  await api.spreadsheets.values.update({
-    spreadsheetId: sheet,
-    range,
-    valueInputOption: "RAW",
-    requestBody: { values: [row] }
-  });
-  try { console.log("✅ Sheets updated", { orderId, range }); } catch {}
 }
 
 const productsCityCache: Map<string, { ts: number; map: Map<string, string> }> = new Map();
@@ -328,9 +363,11 @@ export function registerCourierFlow(bot: TelegramBot) {
           const row = db.prepare("SELECT city_code FROM couriers WHERE tg_id = ? OR courier_id = ?").get(q.from.id, q.from.id) as any;
           if (row && row.city_code) cityCode = String(row.city_code);
         } catch {}
-        await updateOrderInSheets(id, { status: "delivered", delivered_at: new Date().toISOString(), delivered_by: String(q.from.id) }, cityCode);
+        console.log("🔄 Вызов updateOrderInSheets(delivered)...");
+        const ok = await updateOrderInSheets(id, { status: "delivered", delivered_at: new Date().toISOString(), delivered_by: String(q.from.id) }, cityCode);
+        console.log("📋 Sheets результат:", ok);
         await syncOrdersFromSheets(q.from.id, cityCode);
-      } catch {}
+      } catch (e) { console.log("❌ Ошибка обновления Sheets(delivered):", e); }
       await refreshCourierPanel(bot, chatId, q.message?.message_id, q.from.id);
       const order = await getOrderById(id);
       if (order) { try { await bot.sendMessage(order.user_id, "Спасибо за заказ! Приходите к нам ещё."); } catch {} }
@@ -346,9 +383,11 @@ export function registerCourierFlow(bot: TelegramBot) {
             const row = db.prepare("SELECT city_code FROM couriers WHERE tg_id = ? OR courier_id = ?").get(q.from.id, q.from.id) as any;
             if (row && row.city_code) cityCode = String(row.city_code);
           } catch {}
-          await updateOrderInSheets(id, { status: "cancelled", cancelled_at: new Date().toISOString(), cancelled_by: String(q.from.id) }, cityCode);
+          console.log("🔄 Вызов updateOrderInSheets(cancelled)...");
+          const ok = await updateOrderInSheets(id, { status: "cancelled", cancelled_at: new Date().toISOString(), cancelled_by: String(q.from.id) }, cityCode);
+          console.log("📋 Sheets результат:", ok);
           await syncOrdersFromSheets(q.from.id, cityCode);
-        } catch {}
+        } catch (e) { console.log("❌ Ошибка обновления Sheets(cancelled):", e); }
         const order = await getOrderById(id);
         if (order) {
           try { await bot.sendMessage(order.user_id, "❗ Заказ не выдан и удалён из очереди. Оформите новый заказ при необходимости." ); } catch {}
