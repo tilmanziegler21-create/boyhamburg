@@ -644,17 +644,18 @@ export function registerClientFlow(bot: TelegramBot) {
         return;
       }
       await setPaymentMethod(order_id, method === "card" ? "card" : "cash");
+      carts.delete(user_id);
+      const orderNow = await getOrderById(order_id);
       try {
         const backend = (await import("../../infra/backend")).getBackend();
         await backend.updateOrderDetails?.(order_id, {
           courier_id: st.data.courier_id,
           slot_time: st.data.delivery_time,
           delivery_date: st.data.delivery_date,
-          payment_method: method
+          payment_method: method,
+          items: JSON.stringify(orderNow?.items || [])
         } as any);
       } catch {}
-      carts.delete(user_id);
-      const orderNow = await getOrderById(order_id);
       const productsAll = await getProducts();
       const itemsList = (orderNow?.items || []).map((i) => {
         const p = productsAll.find((x) => x.product_id === i.product_id);

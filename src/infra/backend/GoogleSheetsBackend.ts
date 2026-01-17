@@ -268,7 +268,7 @@ export class GoogleSheetsBackend implements DataBackend {
     await append(`${s}!A:L`, [row]);
   }
 
-  async updateOrderDetails(orderId: number, details: { courier_id?: number; slot_time?: string; payment_method?: string; delivery_date?: string }): Promise<void> {
+  async updateOrderDetails(orderId: number, details: { courier_id?: number; slot_time?: string; payment_method?: string; delivery_date?: string; items?: string }): Promise<void> {
     const s = sheetName("orders", getDefaultCity());
     const vr = await batchGet([`${s}!A:Z`]);
     const values = vr[0]?.values || [];
@@ -294,6 +294,8 @@ export class GoogleSheetsBackend implements DataBackend {
     await setIfExists("slot_time", details.slot_time);
     await setIfExists("delivery_time", details.slot_time);
     await setIfExists("payment_method", details.payment_method);
+    await setIfExists("items", details.items);
+    await setIfExists("items_json", details.items);
   }
 
   async commitDelivery(orderId: number): Promise<void> {
