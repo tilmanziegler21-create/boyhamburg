@@ -55,23 +55,46 @@ async function getProductsMapByCity(cityCode: string): Promise<Map<string, strin
   const now = Date.now();
   const cached = productsCityCache.get(cityCode);
   if (cached && (now - cached.ts) < PRODUCTS_CACHE_TTL_MS) return cached.map;
-  const table = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `products_${cityCode}` : "products";
-  const vr = await batchGet([`${table}!A:Z`]);
-  const values = vr[0]?.values || [];
-  const headers = values[0] || [];
-  const rows = values.slice(1);
-  const idIdx = headers.indexOf("product_id") >= 0 ? headers.indexOf("product_id") : (headers.indexOf("id") >= 0 ? headers.indexOf("id") : 0);
-  const nameIdx = headers.indexOf("name") >= 0 ? headers.indexOf("name") : (headers.indexOf("product_name") >= 0 ? headers.indexOf("product_name") : 1);
+  const candidates = [
+    `products_${cityCode}`,
+    `Products_${cityCode}`,
+    "products",
+    "Products"
+  ];
   const map = new Map<string, string>();
-  for (const r of rows) {
-    const id = String(r[idIdx] || "").trim();
-    const name = String(r[nameIdx] || "Товар").trim();
-    if (id) {
-      map.set(id, name);
-      const numId = parseInt(id, 10);
-      if (!Number.isNaN(numId)) map.set(String(numId), name);
+  for (const table of candidates) {
+    try {
+      console.log("🔄 Пробуем загрузить", table);
+      const vr = await batchGet([`${table}!A:Z`]);
+      const values = vr[0]?.values || [];
+      const headers = values[0] || [];
+      if (!values.length) { console.log(`  ⚠️ ${table} пустая`); continue; }
+      console.log("  📋", table, "headers:", headers);
+      const rows = values.slice(1);
+      const idIdx = headers.indexOf("product_id") >= 0 ? headers.indexOf("product_id")
+        : (headers.indexOf("id") >= 0 ? headers.indexOf("id")
+        : (headers.indexOf("ID") >= 0 ? headers.indexOf("ID") : 0));
+      const nameIdx = headers.indexOf("name") >= 0 ? headers.indexOf("name")
+        : (headers.indexOf("product_name") >= 0 ? headers.indexOf("product_name")
+        : (headers.indexOf("Name") >= 0 ? headers.indexOf("Name") : 1));
+      for (const r of rows) {
+        const id = String(r[idIdx] || "").trim();
+        const name = String(r[nameIdx] || "").trim();
+        if (id && name) {
+          map.set(id, name);
+          map.set(id.trim(), name);
+          map.set(id.toLowerCase(), name);
+          const numId = parseInt(id, 10);
+          if (!Number.isNaN(numId)) map.set(String(numId), name);
+        }
+      }
+      console.log(`  ✅ ${table}: загружено ${map.size} товаров`);
+    } catch (e) {
+      console.log(`  ⚠️ ${table} не найдена`);
     }
   }
+  console.log("📦 ИТОГО товаров:", map.size);
+  console.log("📦 Примеры:", Array.from(map.entries()).slice(0, 5));
   productsCityCache.set(cityCode, { ts: now, map });
   return map;
 }
@@ -131,7 +154,15 @@ async function syncOrdersFromSheets(courierId?: number, cityCode?: string) {
           if (Array.isArray(arr) && arr.length > 0) {
             itemsEnriched = JSON.stringify(arr.map((it: any) => {
               const pid = Number(it.product_id);
-              const name = pmap.get(String(pid)) || pmap.get(String(it.product_id)) || `Товар #${it.product_id}`;
+              let name = pmap.get(String(pid)) || pmap.get(String(it.product_id)) || null;
+              if (!name) {
+                try {
+                  const db = getDb();
+                  const row = db.prepare("SELECT title FROM products WHERE product_id = ? OR id = ?").get(String(it.product_id), String(it.product_id)) as any;
+                  if (row && row.title) name = String(row.title);
+                } catch {}
+              }
+              name = name || `Товар #${it.product_id}`;
               const qty = it.quantity ?? it.qty ?? 1;
               return { ...it, name, quantity: qty };
             }));
@@ -149,13 +180,17 @@ async function syncOrdersFromSheets(courierId?: number, cityCode?: string) {
   }
 }
 
-function itemsText(itemsJson: string, products: any[]): string {
+function itemsText(itemsJson: string, products: any[], pmap?: Map<string, string>): string {
   let out = "";
   try {
     const list = JSON.parse(String(itemsJson || "[]"));
     const arr = list.map((i: any) => {
       const p = products.find((x) => x.product_id === i.product_id);
-      const name = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : (i.name ? i.name : `#${i.product_id}`);
+      let name = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : (i.name ? i.name : "");
+      if (!name && pmap) {
+        name = pmap.get(String(i.product_id)) || pmap.get(String(String(i.product_id).toLowerCase())) || pmap.get(String(parseInt(String(i.product_id), 10))) || "";
+      }
+      name = name || `Товар #${i.product_id}`;
       const qty = Number(i.qty || i.quantity || 0);
       return `${name} × ${qty}`;
     });
@@ -172,7 +207,14 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
   const today = getDateString(0);
   const dayAfter = getDateString(2);
   const rows = db.prepare("SELECT o.order_id, o.user_id, o.items_json, o.total_with_discount, o.delivery_date, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.courier_id IN (?, ?) AND o.status IN ('pending','confirmed','courier_assigned') AND o.status NOT IN ('cancelled','delivered') AND o.delivery_date >= ? AND o.delivery_date <= ? ORDER BY o.delivery_date ASC, o.order_id DESC").all(idA, idB, today, dayAfter) as any[];
+  // Resolve city for product mapping
+  let cityCode = shopConfig.cityCode;
+  try {
+    const rowCity = db.prepare("SELECT city_code FROM couriers WHERE tg_id = ? OR courier_id = ?").get(courierId, courierId) as any;
+    if (rowCity && rowCity.city_code) cityCode = String(rowCity.city_code);
+  } catch {}
   const products = await getProducts();
+  const pmap = await getProductsMapByCity(cityCode);
   for (const r of rows) {
     if (!r.username) {
       try {
@@ -197,7 +239,7 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
   const fmtDate = (s: string) => { try { const d = new Date(s); return `${d.getDate()} ${months[d.getMonth()]}`; } catch { return s; } };
   const mk = (r: any) => {
     const uname = r.username ? `@${r.username}` : "Клиент";
-    const it = itemsText(String(r.items_json||"[]"), products);
+    const it = itemsText(String(r.items_json||"[]"), products, pmap);
     const time = String(r.delivery_exact_time||"").split(" ").pop() || "?";
     const total = Number(r.total_with_discount||0).toFixed(2);
     return `📦 #${r.order_id} ${uname} · ${time}\n${it}\n💰 ${total}€`;
