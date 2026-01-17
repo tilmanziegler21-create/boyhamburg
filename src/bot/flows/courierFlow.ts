@@ -80,6 +80,10 @@ async function syncOrdersFromSheets() {
         const tt = String(timeIdx >= 0 ? r[timeIdx] || "" : "");
         const tot = Number(totalIdx >= 0 ? r[totalIdx] || 0 : 0);
         const items = String(itemsIdx >= 0 ? r[itemsIdx] || "[]" : "[]");
+        try {
+          console.log(`🔍 Order #${oid} items from Sheets:`, { raw: items, type: typeof items, length: items.length });
+          try { const parsed = JSON.parse(items); console.log("✅ Parsed items:", parsed); } catch (e) { console.log("❌ Parse error:", String(e)); }
+        } catch {}
         const courierId = Number(courierIdx >= 0 ? r[courierIdx] || 0 : 0);
         db.prepare("INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, delivery_date, delivery_exact_time, courier_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET user_id=excluded.user_id, items_json=excluded.items_json, total_with_discount=excluded.total_with_discount, status=excluded.status, delivery_date=excluded.delivery_date, delivery_exact_time=excluded.delivery_exact_time, courier_id=excluded.courier_id")
           .run(oid, uid, items, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt, courierId);
@@ -171,6 +175,18 @@ export function registerCourierFlow(bot: TelegramBot) {
   bot.onText(/\/courier/, async (msg) => {
     const chatId = msg.chat.id;
     await syncOrdersFromSheets();
+    try {
+      const db = getDb();
+      const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(msg.from?.id, msg.from?.id) as any;
+      const idA = Number(map?.tg_id || msg.from?.id);
+      const idB = Number(map?.courier_id || msg.from?.id);
+      const schema = db.prepare("PRAGMA table_info(orders)").all();
+      console.log("🔍 Orders table schema:", schema);
+      const sample = db.prepare("SELECT order_id, user_id, items_json AS items, total_with_discount AS total, delivery_exact_time AS delivery_time FROM orders WHERE courier_id IN (?,?) ORDER BY order_id DESC LIMIT 3").all(idA, idB) as any[];
+      console.log("🔍 DEBUG ORDERS:", sample.map((o) => ({ id: o.order_id, items: o.items, itemsType: typeof o.items, itemsLength: (o.items || "").length })));
+    } catch (e) {
+      console.log("❌ DEBUG error:", String(e));
+    }
     await refreshCourierPanel(bot, chatId, undefined, msg.from?.id || 0);
   });
 

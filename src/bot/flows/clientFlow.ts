@@ -664,6 +664,7 @@ export function registerClientFlow(bot: TelegramBot) {
       const couriersAll = await getActiveCouriers();
       const courier = couriersAll.find((c) => c.tg_id === (orderNow?.courier_id || -1));
       const paymentText = method === "card" ? "карта" : "наличные";
+      try { console.log("🔍 Order confirmation for:", { orderId: order_id, items: orderNow?.items, itemsType: typeof (orderNow as any)?.items }); } catch {}
       const message = `✅ <b>Заказ #${order_id} оформлен!</b>\n\n📦 <b>Твой заказ:</b>\n${itemsList}\n\n💰 <b>Сумма: ${(orderNow?.total_with_discount || 0).toFixed(2)} €</b>\n💳 <b>Оплата: ${paymentText}</b>\n⏰ <b>Время: ${st.data.delivery_time}</b>\n📅 <b>День: ${st.data.delivery_date}</b>\n\n━━━━━━━━━━━━━━━━\n\n👤 <b>Твой курьер:</b> ${courier?.name || "Курьер"}\n\n<b>Что делать дальше:</b>\n1️⃣ Напиши курьеру (кнопка ниже)\n2️⃣ Скажи что сделал заказ #${order_id}\n3️⃣ Попроси локацию точки выдачи\n4️⃣ Приходи в назначенное время\n\nСпасибо за заказ! 🔥`;
       const order3 = await getOrderById(order_id);
       const notifyTgId2 = order3?.courier_id || null;
