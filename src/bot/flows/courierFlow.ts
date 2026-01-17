@@ -65,6 +65,7 @@ async function syncOrdersFromSheets() {
     const timeIdx = idx("delivery_time");
     const totalIdx = idx("total_amount") >= 0 ? idx("total_amount") : idx("total");
     const itemsIdx = idxAny("items_json","items");
+    const courierIdx = idx("courier_id");
     const validDates = [getDateString(0), getDateString(1), getDateString(2)];
     const db = getDb();
     const tx = db.transaction(() => {
@@ -79,8 +80,9 @@ async function syncOrdersFromSheets() {
         const tt = String(timeIdx >= 0 ? r[timeIdx] || "" : "");
         const tot = Number(totalIdx >= 0 ? r[totalIdx] || 0 : 0);
         const items = String(itemsIdx >= 0 ? r[itemsIdx] || "[]" : "[]");
-        db.prepare("INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, delivery_date, delivery_exact_time) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET user_id=excluded.user_id, items_json=excluded.items_json, total_with_discount=excluded.total_with_discount, status=excluded.status, delivery_date=excluded.delivery_date, delivery_exact_time=excluded.delivery_exact_time")
-          .run(oid, uid, items, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt);
+        const courierId = Number(courierIdx >= 0 ? r[courierIdx] || 0 : 0);
+        db.prepare("INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, delivery_date, delivery_exact_time, courier_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET user_id=excluded.user_id, items_json=excluded.items_json, total_with_discount=excluded.total_with_discount, status=excluded.status, delivery_date=excluded.delivery_date, delivery_exact_time=excluded.delivery_exact_time, courier_id=excluded.courier_id")
+          .run(oid, uid, items, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt, courierId);
         if (uname) db.prepare("INSERT OR IGNORE INTO users(user_id, username, first_seen) VALUES (?,?,?)").run(uid, uname, new Date().toISOString());
       }
     });
@@ -164,6 +166,7 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
 }
 
 export function registerCourierFlow(bot: TelegramBot) {
+  try { setInterval(syncOrdersFromSheets, 5 * 60 * 1000); } catch {}
   bot.onText(/\/courier/, async (msg) => {
     const chatId = msg.chat.id;
     await syncOrdersFromSheets();
