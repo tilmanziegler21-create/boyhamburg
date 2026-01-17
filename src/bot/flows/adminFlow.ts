@@ -3,6 +3,7 @@ import { decodeCb } from "../cb";
 import { env } from "../../infra/config";
 import { shopConfig } from "../../config/shopConfig";
 import { getProducts, getCouriers, updateProductPrice, updateCourier, updateUser } from "../../infra/data";
+import { batchGet } from "../../infra/sheets/SheetsClient";
 import { generateDailyReportCSV, generateCouriersCSV, generateOrdersCSV } from "../../domain/metrics/CSVExport";
 import fs from "fs";
 import { getDb } from "../../infra/db/sqlite";
@@ -24,6 +25,7 @@ export function registerAdminFlow(bot: TelegramBot) {
         [{ text: "Курьеры", callback_data: "admin_couriers" }],
         [{ text: "Назначить курьеров (до 3)", callback_data: "admin_assign_couriers" }],
         [{ text: "Отчёт за день", callback_data: "admin_report_today" }],
+        [{ text: "🛍️ Проданные товары", callback_data: "admin_sold_products" }],
         [{ text: "Upsell статистика", callback_data: "admin_upsell_stats" }],
         [{ text: "Миграция items", callback_data: "admin_migrate_items" }],
         [{ text: "Скачать заказы (CSV)", callback_data: "admin_export_orders" }],
@@ -131,11 +133,111 @@ export function registerAdminFlow(bot: TelegramBot) {
         [{ text: "Курьеры", callback_data: "admin_couriers" }],
         [{ text: "Назначить курьеров (до 3)", callback_data: "admin_assign_couriers" }],
         [{ text: "Отчёт за день", callback_data: "admin_report_today" }],
+        [{ text: "🛍️ Проданные товары", callback_data: "admin_sold_products" }],
         [{ text: "Upsell статистика", callback_data: "admin_upsell_stats" }],
         [{ text: "Скачать заказы (CSV)", callback_data: "admin_export_orders" }]
       ];
       await bot.editMessageText("Админ-панель", { chat_id: chatId, message_id: q.message?.message_id!, reply_markup: { inline_keyboard: keyboard }, parse_mode: "HTML" });
       return;
+    }
+    if (finalData === "admin_sold_products") {
+      const kb: TelegramBot.InlineKeyboardButton[][] = [
+        [{ text: "Сегодня", callback_data: "admin_sold_products_period:today" }],
+        [{ text: "Вчера", callback_data: "admin_sold_products_period:yesterday" }],
+        [{ text: "Последние 7 дней", callback_data: "admin_sold_products_period:days:7" }],
+        [{ text: "Последние 30 дней", callback_data: "admin_sold_products_period:days:30" }],
+        [{ text: "⬅️ Назад", callback_data: "admin_back" }]
+      ];
+      await bot.sendMessage(chatId, "Выберите период", { reply_markup: { inline_keyboard: kb } });
+    } else if (finalData.startsWith("admin_sold_products_period:")) {
+      try {
+        const parts = finalData.split(":");
+        let dateFrom = "";
+        let dateTo = new Date().toISOString().slice(0,10);
+        if (parts[1] === "today") {
+          dateFrom = dateTo;
+        } else if (parts[1] === "yesterday") {
+          dateFrom = new Date(Date.now() - 86400000).toISOString().slice(0,10);
+          dateTo = dateFrom;
+        } else if (parts[1] === "days" && parts[2]) {
+          const d = Number(parts[2]);
+          dateFrom = new Date(Date.now() - d * 86400000).toISOString().slice(0,10);
+        } else {
+          dateFrom = dateTo;
+        }
+        const db = getDb();
+        const cityCode = shopConfig.cityCode || getDefaultCity();
+        const allProducts = new Map<string, string>();
+        const candidates = [`products_${cityCode}`, `Products_${cityCode}`, "products", "Products"];
+        for (const table of candidates) {
+          try {
+            const vr = await batchGet([`${table}!A:Z`]);
+            const values = vr[0]?.values || [];
+            if (!values.length) continue;
+            const headers = values[0] || [];
+            const idIdx = headers.indexOf("product_id") >= 0 ? headers.indexOf("product_id")
+              : (headers.indexOf("id") >= 0 ? headers.indexOf("id") : (headers.indexOf("ID") >= 0 ? headers.indexOf("ID") : 0));
+            const nameIdx = headers.indexOf("name") >= 0 ? headers.indexOf("name")
+              : (headers.indexOf("product_name") >= 0 ? headers.indexOf("product_name")
+              : (headers.indexOf("Name") >= 0 ? headers.indexOf("Name") : 1));
+            for (const r of values.slice(1)) {
+              const id = String(r[idIdx] || "").trim();
+              const nm = String(r[nameIdx] || "").trim();
+              if (id && nm) {
+                allProducts.set(id, nm);
+                allProducts.set(id.trim(), nm);
+                allProducts.set(id.toLowerCase(), nm);
+                const numId = parseInt(id, 10);
+                if (!Number.isNaN(numId)) allProducts.set(String(numId), nm);
+              }
+            }
+          } catch {}
+        }
+        const orders = db.prepare("SELECT order_id, items_json, total_with_discount, delivery_date, reserve_timestamp FROM orders WHERE status='delivered' AND ((delivery_date >= ? AND delivery_date <= ?) OR (substr(reserve_timestamp,1,10) >= ? AND substr(reserve_timestamp,1,10) <= ?)) ORDER BY order_id DESC").all(dateFrom, dateTo, dateFrom, dateTo) as any[];
+        const productsList = await getProducts();
+        const priceMap = new Map<number, number>();
+        for (const p of productsList) priceMap.set(Number(p.product_id), Number(p.price || 0));
+        const productStats = new Map<string, { count: number; revenue: number }>();
+        let totalRevenue = 0;
+        for (const order of orders) {
+          try {
+            const items = JSON.parse(String(order.items_json || "[]"));
+            for (const item of items) {
+              const productId = String(item.product_id);
+              const qty = Number(item.quantity ?? item.qty ?? 1);
+              const price = Number(item.price ?? priceMap.get(Number(item.product_id)) ?? 0);
+              const name = allProducts.get(productId) || allProducts.get(productId.trim()) || allProducts.get(productId.toLowerCase()) || `Товар #${productId}`;
+              const prev = productStats.get(name);
+              if (prev) { prev.count += qty; prev.revenue += price * qty; } else { productStats.set(name, { count: qty, revenue: price * qty }); }
+              totalRevenue += price * qty;
+            }
+          } catch {}
+        }
+        const sorted = Array.from(productStats.entries()).sort((a, b) => b[1].revenue - a[1].revenue);
+        let text = `🛍️ Проданные товары\n`;
+        text += `📅 Период: ${dateFrom} - ${dateTo}\n`;
+        text += `📦 Заказов: ${orders.length}\n`;
+        text += `💰 Выручка: ${totalRevenue.toFixed(2)}€\n\n`;
+        if (!sorted.length) {
+          text += "(нет данных)";
+        } else {
+          const totalItems = sorted.reduce((sum, [, stat]) => sum + stat.count, 0);
+          text += `📊 Всего продано: ${totalItems} позиций\n\n`;
+          for (const [name, stat] of sorted.slice(0, 20)) {
+            text += `${name}\n`;
+            text += `  └ ${stat.count} шт · ${stat.revenue.toFixed(2)}€\n`;
+          }
+          if (sorted.length > 20) text += `\n... и ещё ${sorted.length - 20} товаров`;
+        }
+        const keyboard = { inline_keyboard: [[{ text: "« Назад", callback_data: "admin_sold_products" }]] };
+        try {
+          await bot.editMessageText(text, { chat_id: chatId, message_id: q.message?.message_id, reply_markup: keyboard });
+        } catch {
+          await bot.sendMessage(chatId, text, { reply_markup: keyboard });
+        }
+      } catch (error) {
+        await bot.answerCallbackQuery(q.id, { text: "Ошибка загрузки", show_alert: true });
+      }
     }
     if (finalData === "admin_upsell_stats") {
       const db = getDb();

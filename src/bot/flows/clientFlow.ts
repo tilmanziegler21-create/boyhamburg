@@ -681,7 +681,6 @@ export function registerClientFlow(bot: TelegramBot) {
           contactKeyboard.push([{ text: "💬 Написать курьеру", url: `tg://user?id=${notifyTgId2}` }]);
         }
       } catch {}
-      contactKeyboard.push([{ text: "� Готовое сообщение", url: `https://t.me/share/url?url=&text=${encodeURIComponent(prefill)}` }]);
       contactKeyboard.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
       await bot.editMessageText(message, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: contactKeyboard }, parse_mode: "HTML" });
       try { userStates.delete(user_id); userRerollCount.delete(user_id); } catch {}
