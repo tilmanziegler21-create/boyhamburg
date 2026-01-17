@@ -182,8 +182,11 @@ export async function getProducts(): Promise<Product[]> {
     const s = String(v ?? "").trim();
     const n = Number(s);
     if (Number.isFinite(n)) return n;
-    const m = s.match(/\d+/);
-    return m ? Number(m[0]) : i + 1;
+    // stable hash for string IDs like EL-001, LIQ-001
+    let h = 5381;
+    for (let k = 0; k < s.length; k++) h = ((h << 5) + h) + s.charCodeAt(k);
+    const pos = Math.abs(h >>> 0);
+    return pos || (i + 1);
   };
   const parseNum = (v: any, def: number = 0) => {
     const s = String(v ?? "").trim().replace(/,/g, ".");

@@ -254,4 +254,48 @@ export async function registerCron() {
       logger.error("Purge not_issued error", { error: String(e) });
     }
   }, { timezone });
+
+  cron.schedule("0 * * * *", async () => {
+    try {
+      const db = getDb();
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const rows = db.prepare("SELECT order_id FROM orders WHERE status='pending' AND reserve_timestamp < ?").all(cutoff) as any[];
+      const sheet = (process.env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY") ? `orders_${shopConfig.cityCode}` : "orders";
+      const { batchGet } = await import("../sheets/SheetsClient");
+      const { google } = await import("googleapis");
+      const api = google.sheets({ version: "v4" });
+      const values = (await batchGet([`${sheet}!A:Z`]))[0]?.values || [];
+      const headers = values[0] || [];
+      const idx = (n: string) => headers.indexOf(n);
+      const idIdx = idx("order_id"), statusIdx = idx("status"), cancelledAtIdx = idx("cancelled_at"), cancelledReasonIdx = idx("cancelled_reason");
+      const updated: number[] = [];
+      const tx = db.transaction(() => {
+        for (const r of rows) {
+          db.prepare("UPDATE orders SET status='cancelled' WHERE order_id=?").run(Number(r.order_id));
+          updated.push(Number(r.order_id));
+        }
+      });
+      tx();
+      if (updated.length && idIdx >= 0) {
+        for (let i = 1; i < values.length; i++) {
+          const oid = Number(values[i][idIdx]);
+          if (updated.includes(oid)) {
+            const row = [...values[i]];
+            if (statusIdx >= 0) row[statusIdx] = "cancelled";
+            if (cancelledAtIdx >= 0) row[cancelledAtIdx] = new Date().toISOString();
+            if (cancelledReasonIdx >= 0) row[cancelledReasonIdx] = "auto_expired";
+            await api.spreadsheets.values.update({
+              spreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID!,
+              range: `${sheet}!A${i + 1}:Z${i + 1}`,
+              valueInputOption: "RAW",
+              requestBody: { values: [row] }
+            });
+          }
+        }
+      }
+      if (updated.length) logger.info("Auto-cancelled expired pending orders", { count: updated.length });
+    } catch (e) {
+      logger.error("Auto-cancel expired error", { error: String(e) });
+    }
+  }, { timezone });
 }

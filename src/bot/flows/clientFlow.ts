@@ -143,7 +143,9 @@ export function registerClientFlow(bot: TelegramBot) {
     if (data === "menu_howto" || data === "how_to_order") {
       const rows = [[{ text: "🎯 Начать выбор", callback_data: "catalog" }], [{ text: "🔙 Назад", callback_data: "start" }]];
       try { await bot.deleteMessage(chatId, messageId); } catch {}
-      await bot.sendMessage(chatId, "📖 <b>Как оформить</b>\n\n1️⃣ Выбор вкусов\n2️⃣ Курьер и время\n3️⃣ Оплата", { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
+      const { getManagerContact } = await import("../../config/managerContacts");
+      const managerContact = getManagerContact(shopConfig.cityCode);
+      await bot.sendMessage(chatId, `� <b>Как заказать</b>\n\n1️⃣ Выбор товаров\n2️⃣ Курьер и время\n3️⃣ Оплата\n\n❓ Вопросы?\n${managerContact}`, { reply_markup: { inline_keyboard: rows }, parse_mode: "HTML" });
       return;
     }
     if (data === "catalog_liquids") {
@@ -299,7 +301,9 @@ export function registerClientFlow(bot: TelegramBot) {
     if (data.startsWith("add_item:")) {
       const pid = Number(data.split(":")[1]);
       const products = await getProducts();
+      try { console.log("🔍 Callback(add_item):", data, "pid:", pid, "type:", typeof pid); } catch {}
       const p = products.find((x) => x.product_id === pid);
+      try { console.log("🔍 Found product:", p ? { id: p.product_id, name: p.title, category: p.category } : "NOT FOUND"); } catch {}
       if (!p) return;
       addToCart(user_id, p, false);
       const items = carts.get(user_id) || [];
@@ -654,25 +658,30 @@ export function registerClientFlow(bot: TelegramBot) {
       const productsAll = await getProducts();
       const itemsList = (orderNow?.items || []).map((i) => {
         const p = productsAll.find((x) => x.product_id === i.product_id);
-        const name = p ? p.title : `#${i.product_id}`;
+        const name = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : `#${i.product_id}`;
         return `• ${name} × ${i.qty}`;
       }).join("\n");
       const couriersAll = await getActiveCouriers();
       const courier = couriersAll.find((c) => c.tg_id === (orderNow?.courier_id || -1));
       const paymentText = method === "card" ? "карта" : "наличные";
       const message = `✅ <b>Заказ #${order_id} оформлен!</b>\n\n📦 <b>Твой заказ:</b>\n${itemsList}\n\n💰 <b>Сумма: ${(orderNow?.total_with_discount || 0).toFixed(2)} €</b>\n💳 <b>Оплата: ${paymentText}</b>\n⏰ <b>Время: ${st.data.delivery_time}</b>\n📅 <b>День: ${st.data.delivery_date}</b>\n\n━━━━━━━━━━━━━━━━\n\n👤 <b>Твой курьер:</b> ${courier?.name || "Курьер"}\n\n<b>Что делать дальше:</b>\n1️⃣ Напиши курьеру (кнопка ниже)\n2️⃣ Скажи что сделал заказ #${order_id}\n3️⃣ Попроси локацию точки выдачи\n4️⃣ Приходи в назначенное время\n\nСпасибо за заказ! 🔥`;
-      const closeKb: TelegramBot.InlineKeyboardButton[][] = [[{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]];
-      await bot.editMessageText(message, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: closeKb }, parse_mode: "HTML" });
       const order3 = await getOrderById(order_id);
       const notifyTgId2 = order3?.courier_id || null;
       const contactKeyboard: TelegramBot.InlineKeyboardButton[][] = [];
-      if (notifyTgId2) contactKeyboard.push([{ text: "✉️ Написать курьеру", url: `tg://user?id=${notifyTgId2}` }]);
-      contactKeyboard.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
       try {
-        await bot.sendMessage(chatId, `📍 Попросите у курьера локацию точки выдачи.`, { reply_markup: { inline_keyboard: contactKeyboard }, parse_mode: "HTML" });
-      } catch {
-        await bot.sendMessage(chatId, `📍 Попросите у курьера локацию точки выдачи.`, { reply_markup: { inline_keyboard: [[{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]] }, parse_mode: "HTML" });
-      }
+        const dbx = getDb();
+        const userRow = dbx.prepare("SELECT username FROM users WHERE user_id = ?").get(notifyTgId2 || 0) as any;
+        const uname = String(userRow?.username || "");
+        const prefill = `Привет! Я сделал заказ #${order_id}\n\n📅 Дата: ${st.data.delivery_date}\n⏰ Время: ${st.data.delivery_time}\n\nЗаказал:\n${itemsList}\n\n💰 К оплате: ${(orderNow?.total_with_discount || 0).toFixed(2)}€\n\nГде встретимся?`;
+        if (uname) {
+          const deepLink = `tg://resolve?domain=${uname.replace("@","")}&text=${encodeURIComponent(prefill)}`;
+          contactKeyboard.push([{ text: "💬 Написать курьеру", url: deepLink }]);
+        } else if (notifyTgId2) {
+          contactKeyboard.push([{ text: "✉️ Написать курьеру", url: `tg://user?id=${notifyTgId2}` }]);
+        }
+      } catch {}
+      contactKeyboard.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
+      await bot.editMessageText(message, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: contactKeyboard }, parse_mode: "HTML" });
       try { userStates.delete(user_id); userRerollCount.delete(user_id); } catch {}
     } else if (data.startsWith("gam_upsell_add:")) {
       const pid = Number(data.split(":")[1]);
@@ -744,7 +753,9 @@ export function registerClientFlow(bot: TelegramBot) {
     } else if (data.startsWith("catalog_add:")) {
       const pid = Number(data.split(":")[1]);
       const products = await getProducts();
+      try { console.log("🔍 Callback(catalog_add):", data, "pid:", pid, "type:", typeof pid); } catch {}
       const p = products.find((x) => x.product_id === pid);
+      try { console.log("🔍 Found product:", p ? { id: p.product_id, name: p.title, category: p.category } : "NOT FOUND"); } catch {}
       if (!p) return;
       const items4 = carts.get(user_id) || [];
       const currentQty4 = (items4.find((x) => x.product_id === pid)?.qty || 0);
