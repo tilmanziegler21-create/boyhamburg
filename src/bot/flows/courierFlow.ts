@@ -45,9 +45,38 @@ async function updateOrderInSheets(orderId: number, updates: Record<string, any>
   });
 }
 
-async function syncOrdersFromSheets() {
+const productsCityCache: Map<string, { ts: number; map: Map<string, string> }> = new Map();
+const PRODUCTS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function getProductsMapByCity(cityCode: string): Promise<Map<string, string>> {
+  const now = Date.now();
+  const cached = productsCityCache.get(cityCode);
+  if (cached && (now - cached.ts) < PRODUCTS_CACHE_TTL_MS) return cached.map;
+  const table = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `products_${cityCode}` : "products";
+  const vr = await batchGet([`${table}!A:Z`]);
+  const values = vr[0]?.values || [];
+  const headers = values[0] || [];
+  const rows = values.slice(1);
+  const idIdx = headers.indexOf("product_id") >= 0 ? headers.indexOf("product_id") : (headers.indexOf("id") >= 0 ? headers.indexOf("id") : 0);
+  const nameIdx = headers.indexOf("name") >= 0 ? headers.indexOf("name") : (headers.indexOf("product_name") >= 0 ? headers.indexOf("product_name") : 1);
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    const id = String(r[idIdx] || "").trim();
+    const name = String(r[nameIdx] || "Товар").trim();
+    if (id) {
+      map.set(id, name);
+      const numId = parseInt(id, 10);
+      if (!Number.isNaN(numId)) map.set(String(numId), name);
+    }
+  }
+  productsCityCache.set(cityCode, { ts: now, map });
+  return map;
+}
+
+async function syncOrdersFromSheets(courierId?: number, cityCode?: string) {
   try {
-    const sheet = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `orders_${shopConfig.cityCode}` : "orders";
+    const city = String(cityCode || shopConfig.cityCode);
+    const sheet = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `orders_${city}` : "orders";
     const vr = await batchGet([`${sheet}!A:Z`]);
     const values = vr[0]?.values || [];
     const headers = values[0] || [];
@@ -71,16 +100,17 @@ async function syncOrdersFromSheets() {
     const courierIdx = idx("courier_id");
     const validDates = [getDateString(0), getDateString(1), getDateString(2)];
     const db = getDb();
-    let productsList: any[] = [];
-    try { productsList = await getProducts(); } catch {}
-    const pmap = new Map<number, string>();
-    try { for (const p of productsList) pmap.set(Number(p.product_id), String(p.title || "Товар")); } catch {}
+    const pmap = await getProductsMapByCity(city);
     const tx = db.transaction(() => {
       for (const r of rows) {
         const st = String(statusIdx >= 0 ? r[statusIdx] || "" : "").toLowerCase();
         const dd = String(dateIdx >= 0 ? r[dateIdx] || "" : "");
         if (!["pending","confirmed","courier_assigned"].includes(st)) continue;
         if (!validDates.includes(dd)) continue;
+        if (courierId != null) {
+          const cidSheet = Number(courierIdx >= 0 ? r[courierIdx] || 0 : 0);
+          if (cidSheet !== Number(courierId)) continue;
+        }
         const oid = Number(idIdx >= 0 ? r[idIdx] || 0 : 0);
         const uid = Number(userIdx >= 0 ? r[userIdx] || 0 : 0);
         const uname = String(usernameIdx >= 0 ? r[usernameIdx] || "" : "");
@@ -91,14 +121,14 @@ async function syncOrdersFromSheets() {
           console.log(`🔍 Order #${oid} items from Sheets:`, { raw: itemsRaw, type: typeof itemsRaw, length: itemsRaw.length });
           try { const parsed = JSON.parse(itemsRaw); console.log("✅ Parsed items:", parsed); } catch (e) { console.log("❌ Parse error:", String(e)); }
         } catch {}
-        const courierId = Number(courierIdx >= 0 ? r[courierIdx] || 0 : 0);
+        const courierIdVal = Number(courierIdx >= 0 ? r[courierIdx] || 0 : 0);
         let itemsEnriched = itemsRaw;
         try {
           const arr = JSON.parse(itemsRaw || "[]");
           if (Array.isArray(arr) && arr.length > 0) {
             itemsEnriched = JSON.stringify(arr.map((it: any) => {
               const pid = Number(it.product_id);
-              const name = pmap.get(pid) || `Товар #${it.product_id}`;
+              const name = pmap.get(String(pid)) || pmap.get(String(it.product_id)) || `Товар #${it.product_id}`;
               const qty = it.quantity ?? it.qty ?? 1;
               return { ...it, name, quantity: qty };
             }));
@@ -106,7 +136,7 @@ async function syncOrdersFromSheets() {
           console.log("📝 Enriched items:", itemsEnriched);
         } catch {}
         db.prepare("INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, delivery_date, delivery_exact_time, courier_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET user_id=excluded.user_id, items_json=excluded.items_json, total_with_discount=excluded.total_with_discount, status=excluded.status, delivery_date=excluded.delivery_date, delivery_exact_time=excluded.delivery_exact_time, courier_id=excluded.courier_id")
-          .run(oid, uid, itemsEnriched, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt, courierId);
+          .run(oid, uid, itemsEnriched, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt, courierIdVal);
         if (uname) db.prepare("INSERT OR IGNORE INTO users(user_id, username, first_seen) VALUES (?,?,?)").run(uid, uname, new Date().toISOString());
       }
     });
@@ -191,10 +221,16 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
 }
 
 export function registerCourierFlow(bot: TelegramBot) {
-  try { setInterval(syncOrdersFromSheets, 5 * 60 * 1000); } catch {}
+  try { setInterval(() => { syncOrdersFromSheets(undefined, shopConfig.cityCode); }, 5 * 60 * 1000); } catch {}
   bot.onText(/\/courier/, async (msg) => {
     const chatId = msg.chat.id;
-    await syncOrdersFromSheets();
+    let cityCode = shopConfig.cityCode;
+    try {
+      const db = getDb();
+      const row = db.prepare("SELECT city_code FROM couriers WHERE tg_id = ? OR courier_id = ?").get(msg.from?.id, msg.from?.id) as any;
+      if (row && row.city_code) cityCode = String(row.city_code);
+    } catch {}
+    await syncOrdersFromSheets(msg.from?.id, cityCode);
     try {
       const db = getDb();
       const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(msg.from?.id, msg.from?.id) as any;
