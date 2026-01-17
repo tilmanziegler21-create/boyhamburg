@@ -14,8 +14,22 @@ function getDateString(offset: number) {
   return d.toISOString().slice(0, 10);
 }
 
+function sheetsApiAuthed() {
+  const email = env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const key = env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  const cleanKey = String(key || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim()
+    .replace(/^"+|"+$/g, "");
+  const auth = new google.auth.JWT({ email, key: cleanKey, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+  return google.sheets({ version: "v4", auth });
+}
+
 async function updateOrderInSheets(orderId: number, updates: Record<string, any>, cityCodeOverride?: string): Promise<boolean> {
-  const api = google.sheets({ version: "v4" });
+  const api = sheetsApiAuthed();
   const sheet = env.GOOGLE_SHEETS_SPREADSHEET_ID;
   const city = String(cityCodeOverride || shopConfig.cityCode);
   const name = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `orders_${city}` : "orders";
