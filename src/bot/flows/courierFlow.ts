@@ -120,7 +120,12 @@ async function syncOrdersFromSheets(courierId?: number, cityCode?: string) {
     const timeIdx = (idx("delivery_time") >= 0 ? idx("delivery_time") : idx("slot_time"));
     const totalIdx = idx("total_amount") >= 0 ? idx("total_amount") : idx("total");
     const itemsIdx = (() => {
-      const i = headers.findIndex((h) => String(h).toLowerCase().includes("items"));
+      const i = headers.findIndex((h) => {
+        const s = String(h).trim();
+        const sl = s.toLowerCase();
+        return s === "items (JSON)" || s === "items" || sl.includes("items") || s.includes("JSON");
+      });
+      try { console.log("📋 Headers:", headers); console.log("📋 Items column:", i, "=", i >= 0 ? headers[i] : "N/A"); } catch {}
       return i;
     })();
     const courierIdx = idx("courier_id");
