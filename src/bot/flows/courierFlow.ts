@@ -6,56 +6,159 @@ import { encodeCb, decodeCb } from "../cb";
 import { logger } from "../../infra/logger";
 import { batchGet } from "../../infra/sheets/SheetsClient";
 import { shopConfig } from "../../config/shopConfig";
+import { env } from "../../infra/config";
+import { google } from "googleapis";
+
+function getDateString(offset: number) {
+  const d = new Date(Date.now() + offset * 86400000);
+  return d.toISOString().slice(0, 10);
+}
+
+async function updateOrderInSheets(orderId: number, updates: Record<string, any>) {
+  const api = google.sheets({ version: "v4" });
+  const sheet = env.GOOGLE_SHEETS_SPREADSHEET_ID;
+  const name = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `orders_${shopConfig.cityCode}` : "orders";
+  const resp = await api.spreadsheets.values.get({ spreadsheetId: sheet, range: `${name}!A:Z` });
+  const values = resp.data.values || [];
+  if (!values.length) return;
+  const headers = values[0].map(String);
+  const idx = (n: string) => headers.indexOf(n);
+  const idIdx = idx("order_id");
+  if (idIdx < 0) return;
+  let rowIndex = -1;
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i];
+    if (Number(r[idIdx]) === Number(orderId)) { rowIndex = i; break; }
+  }
+  if (rowIndex < 0) return;
+  const row = [...values[rowIndex]];
+  for (const [k, v] of Object.entries(updates)) {
+    const ci = idx(k);
+    if (ci >= 0) row[ci] = String(v);
+  }
+  const range = `${name}!A${rowIndex + 1}:Z${rowIndex + 1}`;
+  await api.spreadsheets.values.update({
+    spreadsheetId: sheet,
+    range,
+    valueInputOption: "RAW",
+    requestBody: { values: [row] }
+  });
+}
+
+async function syncOrdersFromSheets() {
+  try {
+    const sheet = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `orders_${shopConfig.cityCode}` : "orders";
+    const vr = await batchGet([`${sheet}!A:Z`]);
+    const values = vr[0]?.values || [];
+    const headers = values[0] || [];
+    const rows = values.slice(1);
+    const idx = (name: string) => headers.indexOf(name);
+    const idIdx = idx("order_id");
+    const userIdx = idx("user_id");
+    const usernameIdx = idx("username");
+    const statusIdx = idx("status");
+    const dateIdx = idx("delivery_date");
+    const timeIdx = idx("delivery_time");
+    const totalIdx = idx("total_amount") >= 0 ? idx("total_amount") : idx("total");
+    const itemsIdx = idx("items_json");
+    const validDates = [getDateString(0), getDateString(1), getDateString(2)];
+    const db = getDb();
+    const tx = db.transaction(() => {
+      for (const r of rows) {
+        const st = String(statusIdx >= 0 ? r[statusIdx] || "" : "").toLowerCase();
+        const dd = String(dateIdx >= 0 ? r[dateIdx] || "" : "");
+        if (!["pending","confirmed","courier_assigned"].includes(st)) continue;
+        if (!validDates.includes(dd)) continue;
+        const oid = Number(idIdx >= 0 ? r[idIdx] || 0 : 0);
+        const uid = Number(userIdx >= 0 ? r[userIdx] || 0 : 0);
+        const uname = String(usernameIdx >= 0 ? r[usernameIdx] || "" : "");
+        const tt = String(timeIdx >= 0 ? r[timeIdx] || "" : "");
+        const tot = Number(totalIdx >= 0 ? r[totalIdx] || 0 : 0);
+        const items = String(itemsIdx >= 0 ? r[itemsIdx] || "[]" : "[]");
+        db.prepare("INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, delivery_date, delivery_exact_time) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET user_id=excluded.user_id, items_json=excluded.items_json, total_with_discount=excluded.total_with_discount, status=excluded.status, delivery_date=excluded.delivery_date, delivery_exact_time=excluded.delivery_exact_time")
+          .run(oid, uid, items, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt);
+        if (uname) db.prepare("INSERT OR IGNORE INTO users(user_id, username, first_seen) VALUES (?,?,?)").run(uid, uname, new Date().toISOString());
+      }
+    });
+    tx();
+  } catch (e) {
+    try { logger.warn("syncOrdersFromSheets error", { error: String(e) }); } catch {}
+  }
+}
+
+function itemsText(itemsJson: string, products: any[]): string {
+  let out = "";
+  try {
+    const list = JSON.parse(String(itemsJson || "[]"));
+    const arr = list.map((i: any) => {
+      const p = products.find((x) => x.product_id === i.product_id);
+      return `${p ? p.title : `#${i.product_id}`} × ${i.qty}`;
+    });
+    out = arr.length > 3 ? arr.slice(0,3).join(", ") + "..." : arr.join(", ");
+  } catch {}
+  return out;
+}
+
+async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: number | undefined, courierId: number) {
+  const db = getDb();
+  const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(courierId, courierId) as any;
+  const idA = Number(map?.tg_id || courierId);
+  const idB = Number(map?.courier_id || courierId);
+  const today = getDateString(0);
+  const dayAfter = getDateString(2);
+  const rows = db.prepare("SELECT o.order_id, o.user_id, o.items_json, o.total_with_discount, o.delivery_date, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.courier_id IN (?, ?) AND o.status IN ('pending','confirmed','courier_assigned') AND o.delivery_date >= ? AND o.delivery_date <= ? ORDER BY o.delivery_date ASC, o.order_id DESC").all(idA, idB, today, dayAfter) as any[];
+  const products = await getProducts();
+  const sec = {
+    [getDateString(0)]: [] as any[],
+    [getDateString(1)]: [] as any[],
+    [getDateString(2)]: [] as any[]
+  };
+  for (const r of rows) {
+    if (sec[r.delivery_date]) sec[r.delivery_date].push(r);
+  }
+  const mk = (r: any) => {
+    const uname = r.username ? `@${r.username}` : "Клиент";
+    const it = itemsText(String(r.items_json||"[]"), products);
+    const time = String(r.delivery_exact_time||"").split(" ").pop() || "?";
+    const total = Number(r.total_with_discount||0).toFixed(2);
+    return `📦 #${r.order_id} ${uname}\n📋 ${it}\n⏰ ${time} · 💰 ${total}€`;
+  };
+  const lines: string[] = [];
+  lines.push("═══════════════════════════════");
+  lines.push("     ПАНЕЛЬ КУРЬЕРА");
+  lines.push("═══════════════════════════════");
+  const addSec = (title: string, date: string) => {
+    lines.push(`📅 ${title}`);
+    for (const r of sec[date]) lines.push(mk(r));
+    lines.push("───────────────────────────────");
+  };
+  addSec("ЗАКАЗЫ НА СЕГОДНЯ", getDateString(0));
+  addSec("ЗАКАЗЫ НА ЗАВТРА", getDateString(1));
+  addSec("ЗАКАЗЫ НА ПОСЛЕЗАВТРА", getDateString(2));
+  const keyboard: TelegramBot.InlineKeyboardButton[][] = [];
+  for (const date of [getDateString(0), getDateString(1), getDateString(2)]) {
+    for (const r of sec[date]) {
+      keyboard.push([
+        { text: `✅ Выдано #${r.order_id}`, callback_data: encodeCb(`courier_issue:${r.order_id}`) },
+        { text: `❌ Не выдано #${r.order_id}`, callback_data: encodeCb(`courier_not_issued:${r.order_id}`) }
+      ]);
+    }
+  }
+  keyboard.push([{ text: "🔄 Обновить", callback_data: encodeCb("courier_refresh") }]);
+  keyboard.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
+  try {
+    if (messageId) await bot.editMessageText(lines.join("\n"), { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } });
+    else await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+  } catch {
+    await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+  }
+}
 
 export function registerCourierFlow(bot: TelegramBot) {
   bot.onText(/\/courier/, async (msg) => {
     const chatId = msg.chat.id;
-    const db = getDb();
-    const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(msg.from?.id, msg.from?.id) as any;
-    const idA = Number(map?.tg_id || msg.from?.id);
-    const idB = Number(map?.courier_id || msg.from?.id);
-    const myList = db
-      .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id IN (?, ?) ORDER BY o.order_id DESC LIMIT 100")
-      .all(idA, idB) as any[];
-    let lines = myList.map((o) => `#${o.order_id} ${o.username ? "@" + o.username : "Клиент"} · ${o.delivery_exact_time || "?"}`);
-    let keyboard = myList.map((o) => [
-      { text: `Выдача ${o.order_id}`, callback_data: encodeCb(`courier_issue:${o.order_id}`) },
-      { text: `Не выдано ${o.order_id}`, callback_data: encodeCb(`courier_not_issued:${o.order_id}`) }
-    ]);
-    if (myList.length === 0) {
-      try {
-        const s = `orders_${shopConfig.cityCode}`;
-        const vr = await batchGet([`${s}!A:L`]);
-        const values = vr[0]?.values || [];
-        const headers = values[0] || [];
-        const rows = values.slice(1);
-        const idx = (name: string) => headers.indexOf(name);
-        const idIdx = idx("order_id");
-        const courierIdx = idx("courier_id");
-        const statusIdx = idx("status");
-        const timeIdx = idx("delivery_time");
-        const dateIdx = idx("delivery_date");
-        const userIdx = idx("user_id");
-        const pending = rows.filter((r) => {
-          const cid = String(courierIdx >= 0 ? r[courierIdx] || "" : "");
-          const st = String(statusIdx >= 0 ? r[statusIdx] || "" : "").toLowerCase();
-          return (cid === String(idA) || cid === String(idB)) && (st === "pending" || st === "courier_assigned" || st === "confirmed");
-        }).map((r) => ({
-          order_id: Number(idIdx >= 0 ? r[idIdx] || 0 : 0),
-          user_id: Number(userIdx >= 0 ? r[userIdx] || 0 : 0),
-          delivery_exact_time: `${String(dateIdx>=0?r[dateIdx]||"": "")} ${String(timeIdx>=0?r[timeIdx]||"": "")}`
-        }));
-        lines = pending.map((o) => `#${o.order_id} Клиент · ${o.delivery_exact_time || "?"}`);
-        keyboard = pending.map((o) => [
-          { text: `Выдача ${o.order_id}`, callback_data: encodeCb(`courier_issue:${o.order_id}`) },
-          { text: `Не выдано ${o.order_id}`, callback_data: encodeCb(`courier_not_issued:${o.order_id}`) }
-        ]);
-      } catch (e) {
-        try { logger.warn("courier sheets fallback error", { error: String(e) }); } catch {}
-      }
-    }
-    keyboard.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
-    await bot.sendMessage(chatId, lines.join("\n") || "Нет заказов", { reply_markup: { inline_keyboard: keyboard } });
+    await syncOrdersFromSheets();
+    await refreshCourierPanel(bot, chatId, undefined, msg.from?.id || 0);
   });
 
   bot.on("callback_query", async (q) => {
@@ -69,30 +172,13 @@ export function registerCourierFlow(bot: TelegramBot) {
       return;
     }
     const chatId = q.message?.chat.id || 0;
-    if (data.startsWith("courier_issue:")) {
+    if (data === "courier_refresh") {
+      await refreshCourierPanel(bot, chatId, q.message?.message_id, q.from.id);
+    } else if (data.startsWith("courier_issue:")) {
       const id = Number(data.split(":")[1]);
       await setDelivered(id, q.from.id);
-      try {
-        await bot.deleteMessage(chatId, q.message?.message_id as number);
-      } catch {
-        try { await bot.editMessageText(`Заказ #${id} выдан`, { chat_id: chatId, message_id: q.message?.message_id as number }); } catch {}
-      }
-      try {
-        const db = getDb();
-        const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(q.from.id, q.from.id) as any;
-        const idA = Number(map?.tg_id || q.from.id);
-        const idB = Number(map?.courier_id || q.from.id);
-        const myList = db
-          .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id IN (?, ?) ORDER BY o.order_id DESC LIMIT 100")
-          .all(idA, idB) as any[];
-        const lines2 = myList.map((o) => `#${o.order_id} ${o.username ? "@" + o.username : "Клиент"} · ${o.delivery_exact_time || "?"}`);
-        const keyboard2 = myList.map((o) => [
-          { text: `Выдача ${o.order_id}`, callback_data: encodeCb(`courier_issue:${o.order_id}`) },
-          { text: `Не выдано ${o.order_id}`, callback_data: encodeCb(`courier_not_issued:${o.order_id}`) }
-        ]);
-        keyboard2.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
-        await bot.sendMessage(chatId, lines2.join("\n") || "Нет заказов", { reply_markup: { inline_keyboard: keyboard2 } });
-      } catch {}
+      try { await updateOrderInSheets(id, { status: "delivered", delivered_at: new Date().toISOString(), delivered_by: String(q.from.id) }); } catch {}
+      await refreshCourierPanel(bot, chatId, q.message?.message_id, q.from.id);
       const order = await getOrderById(id);
       if (order) { try { await bot.sendMessage(order.user_id, "Спасибо за заказ! Приходите к нам ещё."); } catch {} }
     } else if (data.startsWith("courier_not_issued:")) {
@@ -100,25 +186,12 @@ export function registerCourierFlow(bot: TelegramBot) {
       try {
         const { setNotIssued, getOrderById } = await import("../../domain/orders/OrderService");
         await setNotIssued(id);
-        try { await bot.deleteMessage(chatId, q.message?.message_id as number); } catch {}
+        try { await updateOrderInSheets(id, { status: "cancelled", cancelled_at: new Date().toISOString(), cancelled_by: String(q.from.id) }); } catch {}
         const order = await getOrderById(id);
         if (order) {
           try { await bot.sendMessage(order.user_id, "❗ Заказ не выдан и удалён из очереди. Оформите новый заказ при необходимости." ); } catch {}
         }
-        const db0 = getDb();
-        const map0 = db0.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(q.from.id, q.from.id) as any;
-        const idA0 = Number(map0?.tg_id || q.from.id);
-        const idB0 = Number(map0?.courier_id || q.from.id);
-        const myList = db0
-          .prepare("SELECT o.order_id, o.user_id, o.delivery_interval, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.status IN ('pending','courier_assigned') AND o.courier_id IN (?, ?) ORDER BY o.order_id DESC LIMIT 100")
-          .all(idA0, idB0) as any[];
-        const lines2 = myList.map((o) => `#${o.order_id} ${o.username ? "@" + o.username : "Клиент"} · ${o.delivery_exact_time || "?"}`);
-        const keyboard2 = myList.map((o) => [
-          { text: `Выдача ${o.order_id}`, callback_data: encodeCb(`courier_issue:${o.order_id}`) },
-          { text: `Не выдано ${o.order_id}`, callback_data: encodeCb(`courier_not_issued:${o.order_id}`) }
-        ]);
-        keyboard2.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
-        await bot.sendMessage(chatId, lines2.join("\n") || "Нет заказов", { reply_markup: { inline_keyboard: keyboard2 } });
+        await refreshCourierPanel(bot, chatId, q.message?.message_id, q.from.id);
       } catch {}
     }
   });
