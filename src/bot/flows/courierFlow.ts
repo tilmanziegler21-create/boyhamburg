@@ -127,31 +127,32 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
   for (const r of rows) {
     if (sec[r.delivery_date]) sec[r.delivery_date].push(r);
   }
+  const months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+  const fmtDate = (s: string) => { try { const d = new Date(s); return `${d.getDate()} ${months[d.getMonth()]}`; } catch { return s; } };
   const mk = (r: any) => {
     const uname = r.username ? `@${r.username}` : "Клиент";
     const it = itemsText(String(r.items_json||"[]"), products);
     const time = String(r.delivery_exact_time||"").split(" ").pop() || "?";
     const total = Number(r.total_with_discount||0).toFixed(2);
-    return `📦 #${r.order_id} ${uname}\n📋 ${it}\n⏰ ${time} · 💰 ${total}€`;
+    return `📦 #${r.order_id} ${uname} · ${time}\n${it}\n💰 ${total}€`;
   };
   const lines: string[] = [];
-  lines.push("═══════════════════════════════");
-  lines.push("     ПАНЕЛЬ КУРЬЕРА");
-  lines.push("═══════════════════════════════");
   const addSec = (title: string, date: string) => {
-    lines.push(`📅 ${title}`);
-    for (const r of sec[date]) lines.push(mk(r));
+    lines.push(`📅 ${title} · ${fmtDate(date)}`);
+    lines.push("");
+    for (const r of sec[date]) { lines.push(mk(r)); lines.push(""); }
     lines.push("───────────────────────────────");
+    lines.push("");
   };
-  addSec("ЗАКАЗЫ НА СЕГОДНЯ", getDateString(0));
-  addSec("ЗАКАЗЫ НА ЗАВТРА", getDateString(1));
-  addSec("ЗАКАЗЫ НА ПОСЛЕЗАВТРА", getDateString(2));
+  addSec("СЕГОДНЯ", getDateString(0));
+  addSec("ЗАВТРА", getDateString(1));
+  addSec("ПОСЛЕЗАВТРА", getDateString(2));
   const keyboard: TelegramBot.InlineKeyboardButton[][] = [];
   for (const date of [getDateString(0), getDateString(1), getDateString(2)]) {
     for (const r of sec[date]) {
       keyboard.push([
         { text: `✅ Выдано #${r.order_id}`, callback_data: encodeCb(`courier_issue:${r.order_id}`) },
-        { text: `❌ Не выдано #${r.order_id}`, callback_data: encodeCb(`courier_not_issued:${r.order_id}`) }
+        { text: `❌ Отменить #${r.order_id}`, callback_data: encodeCb(`courier_not_issued:${r.order_id}`) }
       ]);
     }
   }
