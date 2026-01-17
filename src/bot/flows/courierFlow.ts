@@ -58,16 +58,23 @@ async function syncOrdersFromSheets() {
       return -1;
     };
     const idIdx = idx("order_id");
-    const userIdx = idx("user_id");
+    const userIdx = (idx("user_id") >= 0 ? idx("user_id") : idx("user_tg_id"));
     const usernameIdx = idx("username");
     const statusIdx = idx("status");
     const dateIdx = idx("delivery_date");
-    const timeIdx = idx("delivery_time");
+    const timeIdx = (idx("delivery_time") >= 0 ? idx("delivery_time") : idx("slot_time"));
     const totalIdx = idx("total_amount") >= 0 ? idx("total_amount") : idx("total");
-    const itemsIdx = idxAny("items_json","items");
+    const itemsIdx = (() => {
+      const i = headers.findIndex((h) => String(h).toLowerCase().includes("items"));
+      return i;
+    })();
     const courierIdx = idx("courier_id");
     const validDates = [getDateString(0), getDateString(1), getDateString(2)];
     const db = getDb();
+    let productsList: any[] = [];
+    try { productsList = await getProducts(); } catch {}
+    const pmap = new Map<number, string>();
+    try { for (const p of productsList) pmap.set(Number(p.product_id), String(p.title || "Товар")); } catch {}
     const tx = db.transaction(() => {
       for (const r of rows) {
         const st = String(statusIdx >= 0 ? r[statusIdx] || "" : "").toLowerCase();
@@ -79,14 +86,27 @@ async function syncOrdersFromSheets() {
         const uname = String(usernameIdx >= 0 ? r[usernameIdx] || "" : "");
         const tt = String(timeIdx >= 0 ? r[timeIdx] || "" : "");
         const tot = Number(totalIdx >= 0 ? r[totalIdx] || 0 : 0);
-        const items = String(itemsIdx >= 0 ? r[itemsIdx] || "[]" : "[]");
+        const itemsRaw = String(itemsIdx >= 0 ? r[itemsIdx] || "[]" : "[]");
         try {
-          console.log(`🔍 Order #${oid} items from Sheets:`, { raw: items, type: typeof items, length: items.length });
-          try { const parsed = JSON.parse(items); console.log("✅ Parsed items:", parsed); } catch (e) { console.log("❌ Parse error:", String(e)); }
+          console.log(`🔍 Order #${oid} items from Sheets:`, { raw: itemsRaw, type: typeof itemsRaw, length: itemsRaw.length });
+          try { const parsed = JSON.parse(itemsRaw); console.log("✅ Parsed items:", parsed); } catch (e) { console.log("❌ Parse error:", String(e)); }
         } catch {}
         const courierId = Number(courierIdx >= 0 ? r[courierIdx] || 0 : 0);
+        let itemsEnriched = itemsRaw;
+        try {
+          const arr = JSON.parse(itemsRaw || "[]");
+          if (Array.isArray(arr) && arr.length > 0) {
+            itemsEnriched = JSON.stringify(arr.map((it: any) => {
+              const pid = Number(it.product_id);
+              const name = pmap.get(pid) || `Товар #${it.product_id}`;
+              const qty = it.quantity ?? it.qty ?? 1;
+              return { ...it, name, quantity: qty };
+            }));
+          }
+          console.log("📝 Enriched items:", itemsEnriched);
+        } catch {}
         db.prepare("INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, delivery_date, delivery_exact_time, courier_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET user_id=excluded.user_id, items_json=excluded.items_json, total_with_discount=excluded.total_with_discount, status=excluded.status, delivery_date=excluded.delivery_date, delivery_exact_time=excluded.delivery_exact_time, courier_id=excluded.courier_id")
-          .run(oid, uid, items, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt, courierId);
+          .run(oid, uid, itemsEnriched, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt, courierId);
         if (uname) db.prepare("INSERT OR IGNORE INTO users(user_id, username, first_seen) VALUES (?,?,?)").run(uid, uname, new Date().toISOString());
       }
     });
