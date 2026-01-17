@@ -25,6 +25,7 @@ export function registerAdminFlow(bot: TelegramBot) {
         [{ text: "Назначить курьеров (до 3)", callback_data: "admin_assign_couriers" }],
         [{ text: "Отчёт за день", callback_data: "admin_report_today" }],
         [{ text: "Upsell статистика", callback_data: "admin_upsell_stats" }],
+        [{ text: "Миграция items", callback_data: "admin_migrate_items" }],
         [{ text: "Скачать заказы (CSV)", callback_data: "admin_export_orders" }],
         [{ text: "Статус Sheets", callback_data: "admin_sheets_status" }],
         [{ text: "Запустить repair", callback_data: "admin_repair_now" }],
@@ -251,6 +252,41 @@ export function registerAdminFlow(bot: TelegramBot) {
         try { await bot.sendMessage(Number(u.user_id), "🔥 Акция! Скидка 10% на всё 15 минут. Успейте оформить заказ."); } catch {}
       }
       await bot.sendMessage(chatId, "Акция запущена: 15 минут скидка 10% отмечается у курьера");
+    } else if (finalData === "admin_migrate_items") {
+      try {
+        const db = getDb();
+        const today = new Date().toISOString().slice(0,10);
+        const dayAfter = new Date(Date.now() + 2 * 86400000).toISOString().slice(0,10);
+        const rows = db.prepare("SELECT order_id, items_json FROM orders WHERE status IN ('pending','confirmed','courier_assigned') AND delivery_date >= ? AND delivery_date <= ? ORDER BY order_id DESC").all(today, dayAfter) as any[];
+        const products = await getProducts();
+        const pmap = new Map<number, string>();
+        for (const p of products) pmap.set(Number(p.product_id), String(p.title || "Товар"));
+        const enrichedPairs: Array<{ id: number; items: string }> = [];
+        for (const r of rows) {
+          try {
+            const arr = JSON.parse(String(r.items_json || "[]"));
+            if (Array.isArray(arr) && arr.length > 0) {
+              const enriched = JSON.stringify(arr.map((it: any) => {
+                const pid = Number(it.product_id);
+                const name = pmap.get(pid) || `Товар #${pid}`;
+                const qty = it.quantity ?? it.qty ?? 1;
+                return { ...it, name, quantity: qty };
+              }));
+              db.prepare("UPDATE orders SET items_json = ? WHERE order_id = ?").run(enriched, Number(r.order_id));
+              enrichedPairs.push({ id: Number(r.order_id), items: enriched });
+            }
+          } catch {}
+        }
+        const { getBackend } = await import("../../infra/backend");
+        const backend = getBackend();
+        for (const pair of enrichedPairs) {
+          try { await backend.updateOrderDetails?.(pair.id, { items: pair.items } as any); } catch {}
+        }
+        const kb = [[{ text: "⬅️ Назад", callback_data: "admin_back" }]];
+        await bot.sendMessage(chatId, `✅ Миграция выполнена: обновлено ${enrichedPairs.length} заказов`, { reply_markup: { inline_keyboard: kb } });
+      } catch (e) {
+        await bot.sendMessage(chatId, "❌ Ошибка миграции items");
+      }
     } else if (finalData === "admin_reset_all") {
       const db = getDb();
       db.exec("DELETE FROM orders; DELETE FROM reservations; DELETE FROM events;");
