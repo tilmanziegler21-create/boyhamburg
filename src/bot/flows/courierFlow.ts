@@ -14,10 +14,12 @@ function getDateString(offset: number) {
   return d.toISOString().slice(0, 10);
 }
 
-async function updateOrderInSheets(orderId: number, updates: Record<string, any>) {
+async function updateOrderInSheets(orderId: number, updates: Record<string, any>, cityCodeOverride?: string) {
   const api = google.sheets({ version: "v4" });
   const sheet = env.GOOGLE_SHEETS_SPREADSHEET_ID;
-  const name = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `orders_${shopConfig.cityCode}` : "orders";
+  const city = String(cityCodeOverride || shopConfig.cityCode);
+  const name = env.GOOGLE_SHEETS_MODE === "TABS_PER_CITY" ? `orders_${city}` : "orders";
+  try { console.log("🔍 Sheets update start", { orderId, updates, sheet: name }); } catch {}
   const resp = await api.spreadsheets.values.get({ spreadsheetId: sheet, range: `${name}!A:Z` });
   const values = resp.data.values || [];
   if (!values.length) return;
@@ -43,6 +45,7 @@ async function updateOrderInSheets(orderId: number, updates: Record<string, any>
     valueInputOption: "RAW",
     requestBody: { values: [row] }
   });
+  try { console.log("✅ Sheets updated", { orderId, range }); } catch {}
 }
 
 const productsCityCache: Map<string, { ts: number; map: Map<string, string> }> = new Map();
@@ -151,11 +154,8 @@ function itemsText(itemsJson: string, products: any[]): string {
   try {
     const list = JSON.parse(String(itemsJson || "[]"));
     const arr = list.map((i: any) => {
-      if (i && typeof i.name === "string" && (i.quantity != null)) {
-        return `${i.name} × ${Number(i.quantity || 0)}`;
-      }
       const p = products.find((x) => x.product_id === i.product_id);
-      const name = p ? p.title : (i.name ? i.name : `#${i.product_id}`);
+      const name = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : (i.name ? i.name : `#${i.product_id}`);
       const qty = Number(i.qty || i.quantity || 0);
       return `${name} × ${qty}`;
     });
@@ -171,8 +171,20 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
   const idB = Number(map?.courier_id || courierId);
   const today = getDateString(0);
   const dayAfter = getDateString(2);
-  const rows = db.prepare("SELECT o.order_id, o.user_id, o.items_json, o.total_with_discount, o.delivery_date, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.courier_id IN (?, ?) AND o.status IN ('pending','confirmed','courier_assigned') AND o.delivery_date >= ? AND o.delivery_date <= ? ORDER BY o.delivery_date ASC, o.order_id DESC").all(idA, idB, today, dayAfter) as any[];
+  const rows = db.prepare("SELECT o.order_id, o.user_id, o.items_json, o.total_with_discount, o.delivery_date, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.courier_id IN (?, ?) AND o.status IN ('pending','confirmed','courier_assigned') AND o.status NOT IN ('cancelled','delivered') AND o.delivery_date >= ? AND o.delivery_date <= ? ORDER BY o.delivery_date ASC, o.order_id DESC").all(idA, idB, today, dayAfter) as any[];
   const products = await getProducts();
+  for (const r of rows) {
+    if (!r.username) {
+      try {
+        const chat = await bot.getChat(Number(r.user_id || 0));
+        const uname = chat?.username || null;
+        if (uname) {
+          r.username = uname;
+          try { db.prepare("INSERT INTO users(user_id, username) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET username=?").run(Number(r.user_id), uname, uname); } catch {}
+        }
+      } catch {}
+    }
+  }
   const sec = {
     [getDateString(0)]: [] as any[],
     [getDateString(1)]: [] as any[],
@@ -262,7 +274,16 @@ export function registerCourierFlow(bot: TelegramBot) {
     } else if (data.startsWith("courier_issue:")) {
       const id = Number(data.split(":")[1]);
       await setDelivered(id, q.from.id);
-      try { await updateOrderInSheets(id, { status: "delivered", delivered_at: new Date().toISOString(), delivered_by: String(q.from.id) }); } catch {}
+      try {
+        let cityCode = shopConfig.cityCode;
+        try {
+          const db = getDb();
+          const row = db.prepare("SELECT city_code FROM couriers WHERE tg_id = ? OR courier_id = ?").get(q.from.id, q.from.id) as any;
+          if (row && row.city_code) cityCode = String(row.city_code);
+        } catch {}
+        await updateOrderInSheets(id, { status: "delivered", delivered_at: new Date().toISOString(), delivered_by: String(q.from.id) }, cityCode);
+        await syncOrdersFromSheets(q.from.id, cityCode);
+      } catch {}
       await refreshCourierPanel(bot, chatId, q.message?.message_id, q.from.id);
       const order = await getOrderById(id);
       if (order) { try { await bot.sendMessage(order.user_id, "Спасибо за заказ! Приходите к нам ещё."); } catch {} }
@@ -271,7 +292,16 @@ export function registerCourierFlow(bot: TelegramBot) {
       try {
         const { setNotIssued, getOrderById } = await import("../../domain/orders/OrderService");
         await setNotIssued(id);
-        try { await updateOrderInSheets(id, { status: "cancelled", cancelled_at: new Date().toISOString(), cancelled_by: String(q.from.id) }); } catch {}
+        try {
+          let cityCode = shopConfig.cityCode;
+          try {
+            const db = getDb();
+            const row = db.prepare("SELECT city_code FROM couriers WHERE tg_id = ? OR courier_id = ?").get(q.from.id, q.from.id) as any;
+            if (row && row.city_code) cityCode = String(row.city_code);
+          } catch {}
+          await updateOrderInSheets(id, { status: "cancelled", cancelled_at: new Date().toISOString(), cancelled_by: String(q.from.id) }, cityCode);
+          await syncOrdersFromSheets(q.from.id, cityCode);
+        } catch {}
         const order = await getOrderById(id);
         if (order) {
           try { await bot.sendMessage(order.user_id, "❗ Заказ не выдан и удалён из очереди. Оформите новый заказ при необходимости." ); } catch {}
