@@ -44,8 +44,33 @@ async function getDeliveredCountSourceOfTruth(user_id: number): Promise<number> 
   }
 }
 
+const orderCreationLocks = new Map<number, number>();
+
 export async function createOrder(user_id: number, items: OrderItem[], source?: "normal" | "reminder"): Promise<Order> {
   const db = getDb();
+  const nowMs = Date.now();
+  const lockTs = orderCreationLocks.get(user_id) || 0;
+  if (nowMs - lockTs < 3000) {
+    const recent = db.prepare("SELECT order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, courier_id, delivery_interval, delivery_exact_time, delivery_date, source FROM orders WHERE user_id = ? AND status IN ('buffer','pending') AND reserve_timestamp > datetime('now','-1 minute') ORDER BY order_id DESC LIMIT 1").get(user_id) as any;
+    if (recent) {
+      return {
+        order_id: Number(recent.order_id),
+        user_id: Number(recent.user_id),
+        items: JSON.parse(recent.items_json || "[]"),
+        total_without_discount: Number(recent.total_without_discount || 0),
+        total_with_discount: Number(recent.total_with_discount || 0),
+        discount_total: Number(recent.discount_total || 0),
+        status: String(recent.status || "buffer") as any,
+        reserve_timestamp: String(recent.reserve_timestamp || new Date().toISOString()),
+        expiry_timestamp: String(recent.expiry_timestamp || new Date().toISOString()),
+        courier_id: recent.courier_id != null ? Number(recent.courier_id) : null,
+        delivery_interval: recent.delivery_interval || null,
+        delivery_exact_time: recent.delivery_exact_time || null,
+        source: String(recent.source || "normal") as any
+      };
+    }
+  }
+  orderCreationLocks.set(user_id, nowMs);
   const now = new Date();
   const expiry = addMinutes(now, RESERVATION_TTL_MS / 60000);
   const purchaseCount = await getDeliveredCountSourceOfTruth(user_id);
@@ -75,6 +100,7 @@ export async function createOrder(user_id: number, items: OrderItem[], source?: 
   );
   const order_id = Number(nextId);
   await reserveItems(items, order_id);
+  setTimeout(() => { try { orderCreationLocks.delete(user_id); } catch {} }, 3000);
   return {
     order_id,
     user_id,
