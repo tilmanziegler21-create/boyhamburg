@@ -298,4 +298,24 @@ export async function registerCron() {
       logger.error("Auto-cancel expired error", { error: String(e) });
     }
   }, { timezone });
+
+  cron.schedule("*/15 * * * *", async () => {
+    try {
+      const db = getDb();
+      const backend = getBackend();
+      const today = new Date().toISOString().slice(0,10);
+      const dayAfter = new Date(Date.now() + 2 * 86400000).toISOString().slice(0,10);
+      const rows = db.prepare("SELECT order_id, items_json FROM orders WHERE status IN ('pending','confirmed','courier_assigned') AND delivery_date >= ? AND delivery_date <= ?").all(today, dayAfter) as any[];
+      for (const r of rows) {
+        try {
+          await backend.updateOrderDetails?.(Number(r.order_id), { items: String(r.items_json || "[]") } as any);
+        } catch (e) {
+          logger.warn("Update items to Sheets failed", { order_id: r.order_id, error: String(e) });
+        }
+      }
+      logger.info("Synced items to Sheets for upcoming orders", { count: rows.length });
+    } catch (e) {
+      logger.error("Items sync to Sheets error", { error: String(e) });
+    }
+  }, { timezone });
 }
