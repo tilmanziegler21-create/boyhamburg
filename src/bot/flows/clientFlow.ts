@@ -668,18 +668,9 @@ export function registerClientFlow(bot: TelegramBot) {
       const order3 = await getOrderById(order_id);
       const notifyTgId2 = order3?.courier_id || null;
       const contactKeyboard: TelegramBot.InlineKeyboardButton[][] = [];
-      try {
-        const dbx = getDb();
-        const userRow = dbx.prepare("SELECT username FROM users WHERE user_id = ?").get(notifyTgId2 || 0) as any;
-        const uname = String(userRow?.username || "");
-        const prefill = `Привет! Я сделал заказ #${order_id}\n\n📅 Дата: ${st.data.delivery_date}\n⏰ Время: ${st.data.delivery_time}\n\nЗаказал:\n${itemsList}\n\n💰 К оплате: ${(orderNow?.total_with_discount || 0).toFixed(2)}€\n\nГде встретимся?`;
-        if (uname) {
-          const deepLink = `tg://resolve?domain=${uname.replace("@","")}&text=${encodeURIComponent(prefill)}`;
-          contactKeyboard.push([{ text: "💬 Написать курьеру", url: deepLink }]);
-        } else if (notifyTgId2) {
-          contactKeyboard.push([{ text: "✉️ Написать курьеру", url: `tg://user?id=${notifyTgId2}` }]);
-        }
-      } catch {}
+      const prefill = `Привет! Я сделал заказ #${order_id}\n\n📅 Дата: ${st.data.delivery_date}\n⏰ Время: ${st.data.delivery_time}\n\nЗаказал:\n${itemsList}\n\n💰 К оплате: ${(orderNow?.total_with_discount || 0).toFixed(2)}€\n\nГде встретимся?`;
+      if (notifyTgId2) contactKeyboard.push([{ text: "💬 Написать курьеру", url: `tg://user?id=${notifyTgId2}` }]);
+      contactKeyboard.push([{ text: "📝 Готовое сообщение", url: `https://t.me/share/url?url=&text=${encodeURIComponent(prefill)}` }]);
       contactKeyboard.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
       await bot.editMessageText(message, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: contactKeyboard }, parse_mode: "HTML" });
       try { userStates.delete(user_id); userRerollCount.delete(user_id); } catch {}

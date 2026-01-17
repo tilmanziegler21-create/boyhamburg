@@ -53,6 +53,10 @@ async function syncOrdersFromSheets() {
     const headers = values[0] || [];
     const rows = values.slice(1);
     const idx = (name: string) => headers.indexOf(name);
+    const idxAny = (...names: string[]) => {
+      for (const n of names) { const i = headers.indexOf(n); if (i >= 0) return i; }
+      return -1;
+    };
     const idIdx = idx("order_id");
     const userIdx = idx("user_id");
     const usernameIdx = idx("username");
@@ -60,7 +64,7 @@ async function syncOrdersFromSheets() {
     const dateIdx = idx("delivery_date");
     const timeIdx = idx("delivery_time");
     const totalIdx = idx("total_amount") >= 0 ? idx("total_amount") : idx("total");
-    const itemsIdx = idx("items_json");
+    const itemsIdx = idxAny("items_json","items");
     const validDates = [getDateString(0), getDateString(1), getDateString(2)];
     const db = getDb();
     const tx = db.transaction(() => {
@@ -91,8 +95,13 @@ function itemsText(itemsJson: string, products: any[]): string {
   try {
     const list = JSON.parse(String(itemsJson || "[]"));
     const arr = list.map((i: any) => {
+      if (i && typeof i.name === "string" && (i.quantity != null)) {
+        return `${i.name} × ${Number(i.quantity || 0)}`;
+      }
       const p = products.find((x) => x.product_id === i.product_id);
-      return `${p ? p.title : `#${i.product_id}`} × ${i.qty}`;
+      const name = p ? p.title : (i.name ? i.name : `#${i.product_id}`);
+      const qty = Number(i.qty || i.quantity || 0);
+      return `${name} × ${qty}`;
     });
     out = arr.length > 3 ? arr.slice(0,3).join(", ") + "..." : arr.join(", ");
   } catch {}
