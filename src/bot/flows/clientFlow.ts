@@ -657,9 +657,10 @@ export function registerClientFlow(bot: TelegramBot) {
         } as any);
       } catch {}
       const productsAll = await getProducts();
+      const { formatProductName } = await import("../../utils/products");
       const itemsList = (orderNow?.items || []).map((i) => {
         const p = productsAll.find((x) => x.product_id === i.product_id);
-        const name = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : `#${i.product_id}`;
+        const name = p ? formatProductName(p as any) : `#${i.product_id}`;
         return `• ${name} × ${i.qty}`;
       }).join("\n");
       const couriersAll = await getActiveCouriers();

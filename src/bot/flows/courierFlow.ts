@@ -8,6 +8,9 @@ import { batchGet } from "../../infra/sheets/SheetsClient";
 import { shopConfig } from "../../config/shopConfig";
 import { env } from "../../infra/config";
 import { google } from "googleapis";
+import { getProductsMap, formatProductName, normalizeProductId } from "../../utils/products";
+import { getUsername as loadUsername } from "../../utils/users";
+import { updateRange } from "../../infra/sheets/SheetsClient";
 
 function getDateString(offset: number) {
   const d = new Date(Date.now() + offset * 86400000);
@@ -40,8 +43,8 @@ async function updateOrderInSheets(orderId: number, updates: Record<string, any>
     console.log("  Order:", orderId);
     console.log("  Updates:", updates);
     console.log("  📋 Загрузка из Sheets...");
-    const resp = await api.spreadsheets.values.get({ spreadsheetId: sheet, range: `${name}!A:Z` });
-    const values = resp.data.values || [];
+    const vr = await batchGet([`${name}!A:Z`]);
+    const values = vr[0]?.values || [];
     console.log("  📋 Строк получено:", values.length);
     if (!values.length) {
       console.log("  ❌ Sheet пустой!");
@@ -79,12 +82,7 @@ async function updateOrderInSheets(orderId: number, updates: Record<string, any>
     console.log("  📝 Строка ПОСЛЕ:", row.slice(0, 10));
     const range = `${name}!A${rowIndex + 1}:Z${rowIndex + 1}`;
     console.log("  💾 Запись в range:", range);
-    await api.spreadsheets.values.update({
-      spreadsheetId: sheet,
-      range,
-      valueInputOption: "RAW",
-      requestBody: { values: [row] }
-    });
+    await updateRange(range, [row]);
     console.log("  ✅ Записано в Sheets");
     console.log("✅ updateOrderInSheets УСПЕХ");
     console.log("──────────────────────────────");
@@ -251,7 +249,7 @@ async function syncOrdersFromSheets(courierId?: number, cityCode?: string) {
   }
 }
 
-function itemsText(itemsJson: string, products: any[], pmap?: Map<string, string>): string {
+function itemsText(itemsJson: string, products: any[], pmap?: Map<string, any>): string {
   let out = "";
   try {
     const list = JSON.parse(String(itemsJson || "[]"));
@@ -259,7 +257,8 @@ function itemsText(itemsJson: string, products: any[], pmap?: Map<string, string
       const p = products.find((x) => x.product_id === i.product_id);
       let name = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : (i.name ? i.name : "");
       if (!name && pmap) {
-        name = pmap.get(String(i.product_id)) || pmap.get(String(String(i.product_id).toLowerCase())) || pmap.get(String(parseInt(String(i.product_id), 10))) || "";
+        const prod = pmap.get(String(i.product_id)) || pmap.get(String(String(i.product_id).toLowerCase())) || pmap.get(String(parseInt(String(i.product_id), 10)));
+        if (prod) name = formatProductName(prod);
       }
       name = name || `Товар #${i.product_id}`;
       const qty = Number(i.qty || i.quantity || 0);
@@ -287,16 +286,12 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
     if (rowCity && rowCity.city_code) cityCode = String(rowCity.city_code);
   } catch {}
   const products = await getProducts();
-  const pmap = await getProductsMapByCity(cityCode);
+  const pmapProducts = await getProductsMap(cityCode);
   for (const r of rows) {
     if (!r.username) {
       try {
-        const chat = await bot.getChat(Number(r.user_id || 0));
-        const uname = chat?.username || null;
-        if (uname) {
-          r.username = uname;
-          try { db.prepare("INSERT INTO users(user_id, username) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET username=?").run(Number(r.user_id), uname, uname); } catch {}
-        }
+        const uname = await loadUsername(Number(r.user_id || 0), bot);
+        r.username = uname?.startsWith("@") ? uname.slice(1) : null;
       } catch {}
     }
   }
@@ -312,7 +307,7 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
   const fmtDate = (s: string) => { try { const d = new Date(s); return `${d.getDate()} ${months[d.getMonth()]}`; } catch { return s; } };
   const mk = (r: any) => {
     const uname = r.username ? `@${r.username}` : "Клиент";
-    const it = itemsText(String(r.items_json||"[]"), products, pmap);
+    const it = itemsText(String(r.items_json||"[]"), products, pmapProducts);
     const time = String(r.delivery_exact_time||"").split(" ").pop() || "?";
     const total = Number(r.total_with_discount||0).toFixed(2);
     return `📦 #${r.order_id} ${uname} · ${time}\n${it}\n💰 ${total}€`;

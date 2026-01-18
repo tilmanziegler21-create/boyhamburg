@@ -167,32 +167,8 @@ export function registerAdminFlow(bot: TelegramBot) {
         }
         const db = getDb();
         const cityCode = shopConfig.cityCode || getDefaultCity();
-        const allProducts = new Map<string, string>();
-        const candidates = [`products_${cityCode}`, `Products_${cityCode}`, "products", "Products"];
-        for (const table of candidates) {
-          try {
-            const vr = await batchGet([`${table}!A:Z`]);
-            const values = vr[0]?.values || [];
-            if (!values.length) continue;
-            const headers = values[0] || [];
-            const idIdx = headers.indexOf("product_id") >= 0 ? headers.indexOf("product_id")
-              : (headers.indexOf("id") >= 0 ? headers.indexOf("id") : (headers.indexOf("ID") >= 0 ? headers.indexOf("ID") : 0));
-            const nameIdx = headers.indexOf("name") >= 0 ? headers.indexOf("name")
-              : (headers.indexOf("product_name") >= 0 ? headers.indexOf("product_name")
-              : (headers.indexOf("Name") >= 0 ? headers.indexOf("Name") : 1));
-            for (const r of values.slice(1)) {
-              const id = String(r[idIdx] || "").trim();
-              const nm = String(r[nameIdx] || "").trim();
-              if (id && nm) {
-                allProducts.set(id, nm);
-                allProducts.set(id.trim(), nm);
-                allProducts.set(id.toLowerCase(), nm);
-                const numId = parseInt(id, 10);
-                if (!Number.isNaN(numId)) allProducts.set(String(numId), nm);
-              }
-            }
-          } catch {}
-        }
+        const { getProductsMap, formatProductName, normalizeProductId } = await import("../../utils/products");
+        const prodMap = await getProductsMap(cityCode);
         const orders = db.prepare("SELECT order_id, items_json, total_with_discount, delivery_date, reserve_timestamp FROM orders WHERE status='delivered' AND ((delivery_date >= ? AND delivery_date <= ?) OR (substr(reserve_timestamp,1,10) >= ? AND substr(reserve_timestamp,1,10) <= ?)) ORDER BY order_id DESC").all(dateFrom, dateTo, dateFrom, dateTo) as any[];
         const productsList = await getProducts();
         const priceMap = new Map<number, number>();
@@ -206,7 +182,9 @@ export function registerAdminFlow(bot: TelegramBot) {
               const productId = String(item.product_id);
               const qty = Number(item.quantity ?? item.qty ?? 1);
               const price = Number(item.price ?? priceMap.get(Number(item.product_id)) ?? 0);
-              const name = allProducts.get(productId) || allProducts.get(productId.trim()) || allProducts.get(productId.toLowerCase()) || `Товар #${productId}`;
+              const key = normalizeProductId(productId);
+              const prod = prodMap.get(key);
+              const name = prod ? formatProductName(prod) : `Товар #${productId}`;
               const prev = productStats.get(name);
               if (prev) { prev.count += qty; prev.revenue += price * qty; } else { productStats.set(name, { count: qty, revenue: price * qty }); }
               totalRevenue += price * qty;

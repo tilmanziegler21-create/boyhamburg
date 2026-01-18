@@ -242,6 +242,16 @@ export async function updateProductPrice(product_id: number, new_price: number):
   await writeCell(writeSheet, rowNumber, priceIdx, String(new_price));
 }
 
+export async function updateRange(sheetRange: string, values: string[][]): Promise<void> {
+  const api = sheetsApi();
+  await api.spreadsheets.values.update({
+    spreadsheetId: env.GOOGLE_SHEETS_SPREADSHEET_ID,
+    range: sheetRange,
+    valueInputOption: "RAW",
+    requestBody: { values }
+  });
+}
+
 export async function getCouriers(): Promise<Courier[]> {
   const { headers, rows } = await readSheet("couriers");
   const idIdx = headerIndexAny(headers, ["courier_id", "id"]);
