@@ -119,11 +119,15 @@ export async function sendDailySummary() {
       const headers = values[0] || [];
       const rows = values.slice(1);
       const idx = (name: string) => headers.indexOf(name);
-      const createdIdx = idx("created_at");
+      const deliveredAtIdx = (idx("delivered_at") >= 0 ? idx("delivered_at") : idx("delivered_timestamp"));
       const statusIdx = idx("status");
       const itemsIdx = idx("items_json");
       const today = new Date().toISOString().slice(0,10);
-      const deliveredRows = rows.filter(r => String(createdIdx>=0 ? r[createdIdx]||"" : "").slice(0,10)===today && String(statusIdx>=0 ? r[statusIdx]||"" : "").toLowerCase()==="delivered");
+      const deliveredRows = rows.filter(r => {
+        const d = String(deliveredAtIdx>=0 ? r[deliveredAtIdx]||"" : "").slice(0,10);
+        const st = String(statusIdx>=0 ? r[statusIdx]||"" : "").toLowerCase();
+        return d===today && st==="delivered";
+      });
       const products = await getProducts();
       const map: Record<number, { qty: number; sum: number; title: string; brand: string }> = {};
       for (const r of deliveredRows) {
