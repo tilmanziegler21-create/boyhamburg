@@ -115,4 +115,14 @@ export async function initDb() {
     `);
     db.exec("CREATE INDEX IF NOT EXISTS idx_upsell_events_timestamp ON upsell_events(timestamp)");
   } catch {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS courier_panels (
+        courier_id INTEGER PRIMARY KEY,
+        message_id INTEGER NOT NULL,
+        chat_id INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  } catch {}
 }

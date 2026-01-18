@@ -1,5 +1,6 @@
 import TelegramBot from "node-telegram-bot-api";
 import { getProducts } from "../../infra/data";
+import { formatProductName } from "../../utils/products";
 import { carts, userStates } from "../../infra/storage/InMemoryStorage";
 import { getDb } from "../../infra/db/sqlite";
 import { encodeCb } from "../cb";
@@ -8,7 +9,7 @@ function renderCart(userId: number, products: Awaited<ReturnType<typeof getProdu
   const items = carts.get(userId) || [];
   const lines = items.map((i) => {
     const p = products.find((x) => x.product_id === i.product_id);
-    const t = p ? `${p.brand ? `${String(p.brand).toUpperCase()} · ` : ""}${p.title}` : `#${i.product_id}`;
+    const t = p ? formatProductName(p as any) : `#${i.product_id}`;
     const icon = p && p.category === "electronics" ? "💨" : "💧";
     return `${icon} ${t} x${i.qty} · ${i.price.toFixed(2)} €`;
   }).join("\n") || "Корзина пустая";

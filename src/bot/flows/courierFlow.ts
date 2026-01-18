@@ -271,6 +271,31 @@ function itemsText(itemsJson: string, products: any[], pmap?: Map<string, any>):
 
 const lastPanelMessageId: Map<number, number> = new Map();
 
+function savePanelMessageId(courierId: number, chatId: number, messageId: number) {
+  try {
+    const db = getDb();
+    db.prepare("INSERT OR REPLACE INTO courier_panels(courier_id, message_id, chat_id, updated_at) VALUES (?,?,?,?)").run(courierId, messageId, chatId, new Date().toISOString());
+  } catch {}
+}
+
+function getPanelMessageId(courierId: number): { messageId: number; chatId: number } | null {
+  try {
+    const db = getDb();
+    const row = db.prepare("SELECT message_id, chat_id FROM courier_panels WHERE courier_id = ?").get(courierId) as any;
+    if (row) return { messageId: Number(row.message_id), chatId: Number(row.chat_id) };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function deletePanelMessageId(courierId: number) {
+  try {
+    const db = getDb();
+    db.prepare("DELETE FROM courier_panels WHERE courier_id = ?").run(courierId);
+  } catch {}
+}
+
 async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: number | undefined, courierId: number): Promise<number | undefined> {
   const db = getDb();
   const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(courierId, courierId) as any;
@@ -338,15 +363,35 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
     if (messageId) {
       await bot.editMessageText(lines.join("\n"), { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } });
       lastPanelMessageId.set(courierId, messageId);
+      savePanelMessageId(courierId, chatId, messageId);
       return messageId;
-    } else {
-      const msg = await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
-      lastPanelMessageId.set(courierId, msg.message_id);
-      return msg.message_id;
     }
-  } catch {
+    const saved = getPanelMessageId(courierId);
+    if (saved) {
+      try {
+        await bot.editMessageText(lines.join("\n"), { chat_id: saved.chatId, message_id: saved.messageId, reply_markup: { inline_keyboard: keyboard } });
+        lastPanelMessageId.set(courierId, saved.messageId);
+        savePanelMessageId(courierId, saved.chatId, saved.messageId);
+        return saved.messageId;
+      } catch {
+        deletePanelMessageId(courierId);
+      }
+    }
     const msg = await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
     lastPanelMessageId.set(courierId, msg.message_id);
+    savePanelMessageId(courierId, chatId, msg.message_id);
+    return msg.message_id;
+  } catch {
+    const saved = getPanelMessageId(courierId);
+    if (saved) {
+      try {
+        await bot.deleteMessage(saved.chatId, saved.messageId);
+      } catch {}
+      deletePanelMessageId(courierId);
+    }
+    const msg = await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+    lastPanelMessageId.set(courierId, msg.message_id);
+    savePanelMessageId(courierId, chatId, msg.message_id);
     return msg.message_id;
   }
 }
@@ -374,9 +419,9 @@ export function registerCourierFlow(bot: TelegramBot) {
     } catch (e) {
       console.log("❌ DEBUG error:", String(e));
     }
-    const existingId = lastPanelMessageId.get(msg.from?.id || 0);
-    const mid = await refreshCourierPanel(bot, chatId, existingId, msg.from?.id || 0);
-    if (mid) lastPanelMessageId.set(msg.from?.id || 0, mid);
+    const saved = getPanelMessageId(msg.from?.id || 0);
+    const mid = await refreshCourierPanel(bot, chatId, saved?.messageId, msg.from?.id || 0);
+    if (mid) { lastPanelMessageId.set(msg.from?.id || 0, mid); savePanelMessageId(msg.from?.id || 0, chatId, mid); }
   });
 
   bot.on("callback_query", async (q) => {
