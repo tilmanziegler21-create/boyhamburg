@@ -181,6 +181,13 @@ async function syncOrdersFromSheets(courierId?: number, cityCode?: string) {
     const validDates = [getDateString(0), getDateString(1), getDateString(2)];
     const db = getDb();
     const pmap = await getProductsMapByCity(city);
+    console.log("═══ SYNC START ═══");
+    console.log("Курьер:", courierId);
+    console.log("Город:", city);
+    try {
+      const beforeSync = db.prepare("SELECT order_id, status FROM orders WHERE courier_id = ?").all(Number(courierId || 0)) as any[];
+      console.log("SQLite ДО sync:", beforeSync);
+    } catch {}
     const tx = db.transaction(() => {
       for (const r of rows) {
         const st = String(statusIdx >= 0 ? r[statusIdx] || "" : "").toLowerCase();
@@ -223,12 +230,22 @@ async function syncOrdersFromSheets(courierId?: number, cityCode?: string) {
           }
           console.log("📝 Enriched items:", itemsEnriched);
         } catch {}
-        db.prepare("INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, delivery_date, delivery_exact_time, courier_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET user_id=excluded.user_id, items_json=excluded.items_json, total_with_discount=excluded.total_with_discount, status=excluded.status, delivery_date=excluded.delivery_date, delivery_exact_time=excluded.delivery_exact_time, courier_id=excluded.courier_id")
-          .run(oid, uid, itemsEnriched, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt, courierIdVal);
-        if (uname) db.prepare("INSERT OR IGNORE INTO users(user_id, username, first_seen) VALUES (?,?,?)").run(uid, uname, new Date().toISOString());
+        const existing = db.prepare("SELECT order_id, status FROM orders WHERE order_id = ?").get(oid) as any;
+        if (existing && (String(existing.status).toLowerCase() === "delivered" || String(existing.status).toLowerCase() === "cancelled")) {
+          console.log(`⏭️ #${oid}: статус ${existing.status} защищён от перезаписи`);
+        } else {
+          db.prepare("INSERT INTO orders(order_id, user_id, items_json, total_without_discount, total_with_discount, discount_total, status, reserve_timestamp, expiry_timestamp, delivery_date, delivery_exact_time, courier_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET user_id=excluded.user_id, items_json=excluded.items_json, total_with_discount=excluded.total_with_discount, status=excluded.status, delivery_date=excluded.delivery_date, delivery_exact_time=excluded.delivery_exact_time, courier_id=excluded.courier_id")
+            .run(oid, uid, itemsEnriched, tot, tot, 0, st, new Date().toISOString(), new Date().toISOString(), dd, tt, courierIdVal);
+          if (uname) db.prepare("INSERT OR IGNORE INTO users(user_id, username, first_seen) VALUES (?,?,?)").run(uid, uname, new Date().toISOString());
+        }
       }
     });
     tx();
+    try {
+      const afterSync = db.prepare("SELECT order_id, status FROM orders WHERE courier_id = ?").all(Number(courierId || 0)) as any[];
+      console.log("SQLite ПОСЛЕ sync:", afterSync);
+    } catch {}
+    console.log("═══ SYNC END ═══");
   } catch (e) {
     try { logger.warn("syncOrdersFromSheets error", { error: String(e) }); } catch {}
   }
@@ -253,14 +270,16 @@ function itemsText(itemsJson: string, products: any[], pmap?: Map<string, string
   return out;
 }
 
-async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: number | undefined, courierId: number) {
+const lastPanelMessageId: Map<number, number> = new Map();
+
+async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: number | undefined, courierId: number): Promise<number | undefined> {
   const db = getDb();
   const map = db.prepare("SELECT tg_id, courier_id FROM couriers WHERE tg_id = ? OR courier_id = ?").get(courierId, courierId) as any;
   const idA = Number(map?.tg_id || courierId);
   const idB = Number(map?.courier_id || courierId);
-  const today = getDateString(0);
-  const dayAfter = getDateString(2);
-  const rows = db.prepare("SELECT o.order_id, o.user_id, o.items_json, o.total_with_discount, o.delivery_date, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.courier_id IN (?, ?) AND o.status IN ('pending','confirmed','courier_assigned') AND o.status NOT IN ('cancelled','delivered') AND o.delivery_date >= ? AND o.delivery_date <= ? ORDER BY o.delivery_date ASC, o.order_id DESC").all(idA, idB, today, dayAfter) as any[];
+  const startDate = getDateString(-1);
+  const endDate = getDateString(2);
+  const rows = db.prepare("SELECT o.order_id, o.user_id, o.items_json, o.total_with_discount, o.delivery_date, o.delivery_exact_time, u.username FROM orders o LEFT JOIN users u ON o.user_id=u.user_id WHERE o.courier_id IN (?, ?) AND o.status IN ('pending','confirmed','courier_assigned') AND o.status NOT IN ('cancelled','delivered') AND o.delivery_date >= ? AND o.delivery_date <= ? ORDER BY o.delivery_date ASC, o.order_id DESC").all(idA, idB, startDate, endDate) as any[];
   // Resolve city for product mapping
   let cityCode = shopConfig.cityCode;
   try {
@@ -321,10 +340,19 @@ async function refreshCourierPanel(bot: TelegramBot, chatId: number, messageId: 
   keyboard.push([{ text: "🔄 Обновить", callback_data: encodeCb("courier_refresh") }]);
   keyboard.push([{ text: "🏠 Главное меню", callback_data: encodeCb("back:main") }]);
   try {
-    if (messageId) await bot.editMessageText(lines.join("\n"), { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } });
-    else await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+    if (messageId) {
+      await bot.editMessageText(lines.join("\n"), { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } });
+      lastPanelMessageId.set(courierId, messageId);
+      return messageId;
+    } else {
+      const msg = await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+      lastPanelMessageId.set(courierId, msg.message_id);
+      return msg.message_id;
+    }
   } catch {
-    await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+    const msg = await bot.sendMessage(chatId, lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+    lastPanelMessageId.set(courierId, msg.message_id);
+    return msg.message_id;
   }
 }
 
@@ -351,7 +379,9 @@ export function registerCourierFlow(bot: TelegramBot) {
     } catch (e) {
       console.log("❌ DEBUG error:", String(e));
     }
-    await refreshCourierPanel(bot, chatId, undefined, msg.from?.id || 0);
+    const existingId = lastPanelMessageId.get(msg.from?.id || 0);
+    const mid = await refreshCourierPanel(bot, chatId, existingId, msg.from?.id || 0);
+    if (mid) lastPanelMessageId.set(msg.from?.id || 0, mid);
   });
 
   bot.on("callback_query", async (q) => {
