@@ -53,6 +53,18 @@ export function registerAdminFlow(bot: TelegramBot) {
       await bot.sendMessage(ctx.chat.id, `❌ Ошибка: ${error.message}`);
     }
   });
+  bot.onText(/\/test_report\s+(\d{4}-\d{2}-\d{2})/, async (msg, match) => {
+    const adminIds = process.env.TELEGRAM_ADMIN_IDS?.split(',') || [];
+    if (!adminIds.includes(msg.from?.id.toString() || '')) return;
+    const date = match?.[1] || new Date().toISOString().slice(0,10);
+    try {
+      await bot.sendMessage(msg.chat.id, `⏳ Генерирую отчёт за ${date}...`);
+      const text = await generateDailySummaryText(date);
+      await bot.sendMessage(msg.chat.id, text);
+    } catch (e: any) {
+      await bot.sendMessage(msg.chat.id, `❌ Ошибка: ${e.message || e}`);
+    }
+  });
 
   bot.on("message", async (msg) => {
     if (!isAdmin(msg.from?.id || 0)) return;

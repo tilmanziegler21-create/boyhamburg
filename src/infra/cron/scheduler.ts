@@ -13,10 +13,11 @@ import { shopConfig } from "../../config/shopConfig";
 import { ReportService } from "../../services/ReportService";
 import { batchGet } from "../sheets/SheetsClient";
 import { getProducts } from "../data";
+import { getProductsMap, normalizeProductId, formatProductName } from "../../utils/products";
 
-export async function generateDailySummaryText(): Promise<string> {
+export async function generateDailySummaryText(dateOverride?: string): Promise<string> {
   const db = getDb();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = (dateOverride && /^\d{4}-\d{2}-\d{2}$/.test(dateOverride)) ? dateOverride : new Date().toISOString().slice(0, 10);
   const start = Date.parse(`${today}T00:00:00.000Z`);
   const end = start + 86400000;
   const rs = new ReportService();
@@ -67,8 +68,29 @@ export async function generateDailySummaryText(): Promise<string> {
   } catch {}
   const effectiveOffers = Math.max(upsellOffered - upsellRerolls, 1);
   const conv = Math.round((upsellAccepted / effectiveOffers) * 1000) / 10;
+  // Recompute items block based on delivered orders in SQLite
+  const deliveredOrders = db
+    .prepare(
+      "SELECT items_json FROM orders WHERE status='delivered' AND ((delivered_at_ms >= ? AND delivered_at_ms < ?) OR (delivered_at_ms IS NULL AND substr(delivered_timestamp,1,10)=?))"
+    )
+    .all(start, end, today) as any[];
+  const prodMap = await getProductsMap(shopConfig.cityCode);
+  const stats: Map<string, number> = new Map();
+  for (const r of deliveredOrders) {
+    try {
+      const items = JSON.parse(String(r.items_json || "[]"));
+      for (const it of items) {
+        const pid = normalizeProductId(it.product_id ?? it.id);
+        const prod = prodMap.get(pid);
+        const name = prod ? formatProductName(prod) : `#${pid}`;
+        const qty = Number(it.qty ?? it.quantity ?? 0);
+        stats.set(name, (stats.get(name) || 0) + qty);
+      }
+    } catch {}
+  }
   const itemsBlock =
-    Object.entries(report.itemsSold || {})
+    Array.from(stats.entries())
+      .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => `• ${name}: ${count} шт`)
       .join("\n") || "(нет данных)";
   const summary = [
